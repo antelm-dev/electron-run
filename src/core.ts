@@ -27,6 +27,7 @@ export function createElectronRunner(options: ElectronRunOptions = {}): Electron
   const enableStdinControls = options.stdinControls ?? true;
   const clearScreen = options.clearScreen ?? false;
   const logger = options.logger ?? createLogger("electron-run");
+  const electronBinary = options.electronPath;
 
   const enqueue = createTaskQueue();
 
@@ -78,7 +79,7 @@ export function createElectronRunner(options: ElectronRunOptions = {}): Electron
     const pidFile = pidFilePath(context.cwd, Date.now(), process.pid);
 
     const child = cp.spawn(
-      resolveElectronBinary(),
+      electronBinary ?? resolveElectronBinary(),
       [...context.additionalArgs, context.entryFile],
       {
         cwd: context.cwd,

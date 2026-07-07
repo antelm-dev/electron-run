@@ -84,16 +84,17 @@ Disable this with `stdinControls: false`.
 
 ## Options
 
-| Option           | Type                     | Default         | Description                                              |
-| ---------------- | ------------------------ | --------------- | -------------------------------------------------------- |
-| `entry`          | `string`                 | `"main.js"`     | Entry file resolved against the bundle output directory. |
-| `debounceMs`     | `number`                 | `150`           | Debounce before a rebuild triggers a restart.            |
-| `additionalArgs` | `string[]`               | `[]`            | Extra CLI args passed to Electron before the entry file. |
-| `cwd`            | `string`                 | `process.cwd()` | Working directory for the spawned process.               |
-| `env`            | `Record<string, string>` | `{}`            | Extra environment variables merged onto `process.env`.   |
-| `stdinControls`  | `boolean`                | `true`          | Enable interactive stdin commands.                       |
-| `clearScreen`    | `boolean`                | `false`         | Clear the terminal before each launch.                   |
-| `logger`         | `LoggerLike`             | console logger  | Custom logger (`error`/`warn`/`info`/`debug`).           |
+| Option           | Type                     | Default             | Description                                                                                                |
+| ---------------- | ------------------------ | ------------------- | ---------------------------------------------------------------------------------------------------------- |
+| `entry`          | `string`                 | `"main.js"`         | Entry file resolved against the bundle output directory.                                                   |
+| `electronPath`   | `string`                 | resolves `electron` | Path to the Electron binary. Set it when `electron` isn't resolvable from this package (e.g. when linked). |
+| `debounceMs`     | `number`                 | `150`               | Debounce before a rebuild triggers a restart.                                                              |
+| `additionalArgs` | `string[]`               | `[]`                | Extra CLI args passed to Electron before the entry file.                                                   |
+| `cwd`            | `string`                 | `process.cwd()`     | Working directory for the spawned process.                                                                 |
+| `env`            | `Record<string, string>` | `{}`                | Extra environment variables merged onto `process.env`.                                                     |
+| `stdinControls`  | `boolean`                | `true`              | Enable interactive stdin commands.                                                                         |
+| `clearScreen`    | `boolean`                | `false`             | Clear the terminal before each launch.                                                                     |
+| `logger`         | `LoggerLike`             | console logger      | Custom logger (`error`/`warn`/`info`/`debug`).                                                             |
 
 ## API
 

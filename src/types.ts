@@ -32,6 +32,12 @@ export interface BundleOutputLocation {
 export interface ElectronRunOptions {
   /** Entry file resolved against the bundle output directory. Defaults to `main.js`. */
   entry?: string;
+  /**
+   * Path to the Electron binary to launch. Defaults to resolving the `electron`
+   * package. Set this when the `electron` package isn't resolvable from this
+   * library (e.g. when it's linked into another project).
+   */
+  electronPath?: string;
   /** Debounce in ms before a rebuild triggers a restart. Defaults to `150`. */
   debounceMs?: number;
   /** Extra CLI args passed to the Electron binary before the entry file. */

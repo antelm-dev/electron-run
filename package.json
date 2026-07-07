@@ -32,6 +32,7 @@
   },
   "scripts": {
     "build": "tsc",
+    "prepare": "tsc",
     "typecheck": "tsc --noEmit",
     "lint": "oxlint .",
     "lint:fix": "oxlint --fix .",
