@@ -1,5 +1,5 @@
 {
-  "name": "electron-run",
+  "name": "rollup-plugin-electron-run",
   "version": "0.1.0",
   "description": "Rollup plugin and runner that live-reloads Electron on rebuild, with interactive restart controls.",
   "keywords": [
@@ -26,9 +26,18 @@
     "LICENSE"
   ],
   "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "sideEffects": false,
   "exports": {
-    ".": "./dist/index.js",
-    "./rollup-plugin": "./dist/rollup-plugin.js"
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./rollup-plugin": {
+      "types": "./dist/rollup-plugin.d.ts",
+      "import": "./dist/rollup-plugin.js"
+    }
   },
   "scripts": {
     "build": "tsc",
