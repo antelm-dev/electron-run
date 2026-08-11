@@ -1,0 +1,80 @@
+name: Release
+
+on:
+  push:
+    branches:
+      - master
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+    outputs:
+      released: ${{ steps.release.outputs.release_created }}
+      tag: ${{ steps.release.outputs.tag_name }}
+    steps:
+      - id: release
+        uses: googleapis/release-please-action@v5
+        with:
+          # Configured by release-please-config.json so bump-minor-pre-major
+          # applies; it is not available as an action input.
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+  publish:
+    needs: release-please
+    if: needs.release-please.outputs.released == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # npm trusted publishing / provenance
+    environment: npm
+    env:
+      # electron is never imported by the tests; only its binary path is resolved
+      ELECTRON_SKIP_BINARY_DOWNLOAD: 1
+      RELEASE_TAG: ${{ needs.release-please.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.release-please.outputs.tag }}
+      - uses: pnpm/action-setup@v6.0.9
+      - uses: actions/setup-node@v7
+        with:
+          # npm 11.5.1+ is what speaks trusted publishing; Node 24 ships it.
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # `prepack` already runs `check && build` on publish
+      - name: Publish with the appropriate npm dist-tag
+        run: |
+          if [[ "$RELEASE_TAG" == *-* ]]; then
+            npm publish --access public --tag next
+          else
+            npm publish --access public
+          fi
+      - name: Say when `next` needs retiring by hand
+        # A prerelease has to publish under some tag or it would take `latest`,
+        # so `next` outlives the line it was created for: after a stable
+        # release it still points at the last prerelease, and
+        # `npm install …@next` installs something older than `latest`.
+        #
+        # Trusted publishing authenticates `npm publish` only, not
+        # `npm dist-tag`, so moving the tag here would fail after the package
+        # was already published. Printing the command keeps it in front of
+        # whoever cut the release.
+        if: ${{ !contains(needs.release-please.outputs.tag, '-') }}
+        run: |
+          if npm dist-tag ls rollup-plugin-electron-run | grep -q '^next:'; then
+            echo "::warning title=Stale next dist-tag::A stable release just shipped and \`next\` still points at a prerelease. Run: npm dist-tag rm rollup-plugin-electron-run next"
+          fi

@@ -1,12 +1,10 @@
 # Changelog
 
-All notable changes to this project are documented here. The format follows
-[Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres
-to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+## 0.1.0
 
-## [Unreleased]
+Initial release.
 
-### Added
+### Features
 
 - Rollup plugin that restarts Electron on every bundle write, debounced.
 - Standalone runner (`createElectronRunner`) for custom watchers.
@@ -15,5 +13,3 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   watcher cannot leave Electron processes behind.
 - `electronPath` option, for setups where the `electron` package is not
   resolvable from the consuming project.
-
-[unreleased]: https://github.com/antelm-dev/electron-run/commits/master
