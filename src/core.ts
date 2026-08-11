@@ -86,7 +86,6 @@ export function createElectronRunner(options: ElectronRunOptions = {}): Electron
 
   let restartTimer: ReturnType<typeof setTimeout> | undefined;
   let currentProcess: ChildProcess | null = null;
-  let currentPidFile: string | null = null;
   let lastLaunchContext: LaunchContext | null = null;
   let shutdownRegistered = false;
   let stdinRegistered = false;
@@ -144,8 +143,6 @@ export function createElectronRunner(options: ElectronRunOptions = {}): Electron
     }
 
     currentProcess = null;
-    currentPidFile = null;
-
     for (const pidFile of listPidFiles(pidsDir).filter(isReclaimable)) {
       const info = readPidInfo(pidFile, logger);
       if (!info) {
@@ -202,7 +199,6 @@ export function createElectronRunner(options: ElectronRunOptions = {}): Electron
     const detach = () => {
       if (currentProcess === child) {
         currentProcess = null;
-        currentPidFile = null;
       }
       removePidFile(pidFile, logger);
     };
@@ -222,7 +218,6 @@ export function createElectronRunner(options: ElectronRunOptions = {}): Electron
     });
 
     currentProcess = child;
-    currentPidFile = pidFile;
 
     try {
       let identity: string | null = null;

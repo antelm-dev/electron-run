@@ -145,7 +145,7 @@ export async function getProcessIdentity(pid: number): Promise<string | null> {
 
   if (process.platform === "win32") {
     const script = [
-      `$p = Get-CimInstance Win32_Process -Filter \"ProcessId = ${pid}\"`,
+      `$p = Get-CimInstance Win32_Process -Filter "ProcessId = ${pid}"`,
       "if ($null -ne $p) { @($p.CreationDate, $p.ExecutablePath, $p.CommandLine) | ConvertTo-Json -Compress }",
     ].join("; ");
     return execFileText("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script]);
