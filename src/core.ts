@@ -32,6 +32,14 @@ export interface ElectronRunner {
   close(): Promise<void>;
 }
 
+interface StdinOwnership {
+  activeRunners: number;
+  wasOriginallyFlowing: boolean;
+}
+
+/** Coordinate ownership when multiple runners share the same stdin stream. */
+const stdinOwnership = new WeakMap<object, StdinOwnership>();
+
 /** Resolve `true` when the child exits before `timeoutMs`, `false` on timeout. */
 function waitForExit(child: ChildProcess, timeoutMs: number): Promise<boolean> {
   if (child.exitCode !== null || child.signalCode !== null) {
@@ -89,7 +97,8 @@ export function createElectronRunner(options: ElectronRunOptions = {}): Electron
   let lastLaunchContext: LaunchContext | null = null;
   let shutdownRegistered = false;
   let stdinRegistered = false;
-  let stdinWasFlowingBeforeRegistration: boolean | null = null;
+  let registeredStdin: typeof process.stdin | null = null;
+  let stdinOwnershipClaimed = false;
   let isShuttingDown = false;
   let closed = false;
   let closePromise: Promise<void> | null = null;
@@ -363,16 +372,27 @@ export function createElectronRunner(options: ElectronRunOptions = {}): Electron
   }
 
   function registerStdin() {
-    if (stdinRegistered || !process.stdin.isTTY) {
+    const stdin = process.stdin;
+    if (stdinRegistered || !stdin.isTTY) {
       return;
     }
 
     stdinRegistered = true;
-    stdinWasFlowingBeforeRegistration = process.stdin.readableFlowing === true;
-    process.stdin.setEncoding("utf8");
-    process.stdin.resume();
+    registeredStdin = stdin;
+    let ownership = stdinOwnership.get(stdin);
+    if (!ownership) {
+      ownership = {
+        activeRunners: 0,
+        wasOriginallyFlowing: stdin.readableFlowing === true,
+      };
+      stdinOwnership.set(stdin, ownership);
+    }
+    ownership.activeRunners += 1;
+    stdinOwnershipClaimed = true;
+    stdin.setEncoding("utf8");
+    stdin.resume();
 
-    process.stdin.on("data", handleStdinData);
+    stdin.on("data", handleStdinData);
   }
 
   function handleStdinData(chunk: string) {
@@ -429,16 +449,21 @@ export function createElectronRunner(options: ElectronRunOptions = {}): Electron
       }
       signalHandlers.clear();
       process.off("exit", handleProcessExit);
-      if (stdinRegistered) {
-        process.stdin.off("data", handleStdinData);
-        if (
-          stdinWasFlowingBeforeRegistration === false &&
-          process.stdin.listenerCount("data") === 0
-        ) {
-          process.stdin.pause();
+      if (stdinRegistered && registeredStdin) {
+        registeredStdin.off("data", handleStdinData);
+        const ownership = stdinOwnership.get(registeredStdin);
+        if (stdinOwnershipClaimed && ownership) {
+          ownership.activeRunners -= 1;
+          if (ownership.activeRunners === 0) {
+            if (!ownership.wasOriginallyFlowing && registeredStdin.listenerCount("data") === 0) {
+              registeredStdin.pause();
+            }
+            stdinOwnership.delete(registeredStdin);
+          }
         }
         stdinRegistered = false;
-        stdinWasFlowingBeforeRegistration = null;
+        registeredStdin = null;
+        stdinOwnershipClaimed = false;
       }
 
       closePromise = enqueue(() => stopElectronProcess());

@@ -416,4 +416,54 @@ describe("interactive stdin commands", () => {
     }
     expect(spawn).not.toHaveBeenCalled();
   });
+
+  it("restores shared stdin after concurrent runners close in creation order", async () => {
+    attachTty();
+    const { logger } = captureLogger();
+    const first = createElectronRunner({ cwd, debounceMs: 1, logger });
+    const second = createElectronRunner({ cwd, debounceMs: 1, logger });
+
+    expect(stdin.listenerCount("data")).toBe(2);
+    await first.close();
+    expect(stdin.readableFlowing).toBe(true);
+    expect(stdin.listenerCount("data")).toBe(1);
+
+    await second.close();
+    expect(stdin.isPaused()).toBe(true);
+    expect(stdin.listenerCount("data")).toBe(0);
+  });
+
+  it("restores shared stdin after concurrent runners close in reverse order", async () => {
+    attachTty();
+    const { logger } = captureLogger();
+    const first = createElectronRunner({ cwd, debounceMs: 1, logger });
+    const second = createElectronRunner({ cwd, debounceMs: 1, logger });
+
+    await second.close();
+    expect(stdin.readableFlowing).toBe(true);
+    expect(stdin.listenerCount("data")).toBe(1);
+
+    await first.close();
+    expect(stdin.isPaused()).toBe(true);
+    expect(stdin.listenerCount("data")).toBe(0);
+  });
+
+  it("captures fresh stdin state after a runner group fully closes", async () => {
+    attachTty();
+    const { logger } = captureLogger();
+    const first = createElectronRunner({ cwd, debounceMs: 1, logger });
+    const second = createElectronRunner({ cwd, debounceMs: 1, logger });
+    await first.close();
+    await second.close();
+    expect(stdin.isPaused()).toBe(true);
+
+    stdin.resume();
+    const pause = vi.spyOn(stdin, "pause");
+    const later = createElectronRunner({ cwd, debounceMs: 1, logger });
+    await later.close();
+
+    expect(pause).not.toHaveBeenCalled();
+    expect(stdin.readableFlowing).toBe(true);
+    expect(stdin.listenerCount("data")).toBe(0);
+  });
 });
