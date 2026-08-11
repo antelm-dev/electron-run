@@ -374,7 +374,21 @@ describe("interactive stdin commands", () => {
     await runner.close();
   });
 
-  it("close is final, idempotent, and removes only runner-owned listeners", async () => {
+  it("restores paused stdin when the runner was its sole consumer", async () => {
+    attachTty();
+    const { logger } = captureLogger();
+    const runner = createElectronRunner({ cwd, debounceMs: 1, logger });
+
+    expect(stdin.readableFlowing).toBe(true);
+    expect(stdin.listenerCount("data")).toBe(1);
+
+    await runner.close();
+
+    expect(stdin.isPaused()).toBe(true);
+    expect(stdin.listenerCount("data")).toBe(0);
+  });
+
+  it("close preserves flowing stdin owned by an unrelated consumer", async () => {
     attachTty();
     const unrelated = vi.fn();
     stdin.on("data", unrelated);
@@ -395,6 +409,7 @@ describe("interactive stdin commands", () => {
     await flush();
 
     expect(pause).not.toHaveBeenCalled();
+    expect(stdin.readableFlowing).toBe(true);
     expect(stdin.listeners("data")).toEqual([unrelated]);
     for (const [signal, count] of initialSignals) {
       expect(process.listenerCount(signal)).toBe(count);

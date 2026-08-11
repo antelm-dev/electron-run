@@ -89,6 +89,7 @@ export function createElectronRunner(options: ElectronRunOptions = {}): Electron
   let lastLaunchContext: LaunchContext | null = null;
   let shutdownRegistered = false;
   let stdinRegistered = false;
+  let stdinWasFlowingBeforeRegistration: boolean | null = null;
   let isShuttingDown = false;
   let closed = false;
   let closePromise: Promise<void> | null = null;
@@ -367,6 +368,7 @@ export function createElectronRunner(options: ElectronRunOptions = {}): Electron
     }
 
     stdinRegistered = true;
+    stdinWasFlowingBeforeRegistration = process.stdin.readableFlowing === true;
     process.stdin.setEncoding("utf8");
     process.stdin.resume();
 
@@ -429,7 +431,14 @@ export function createElectronRunner(options: ElectronRunOptions = {}): Electron
       process.off("exit", handleProcessExit);
       if (stdinRegistered) {
         process.stdin.off("data", handleStdinData);
+        if (
+          stdinWasFlowingBeforeRegistration === false &&
+          process.stdin.listenerCount("data") === 0
+        ) {
+          process.stdin.pause();
+        }
         stdinRegistered = false;
+        stdinWasFlowingBeforeRegistration = null;
       }
 
       closePromise = enqueue(() => stopElectronProcess());
