@@ -2,33 +2,134 @@ name: CI
 
 on:
   push:
-    branches: [main, master]
+    branches: [master]
   pull_request:
-    branches: [main, master]
 
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+env:
+  # electron is never imported: only the path its package exports is resolved,
+  # and the tests mock that away. The binary is 100+ MB of nothing useful here.
+  ELECTRON_SKIP_BINARY_DOWNLOAD: 1
 
 jobs:
-  test:
+  lint:
     runs-on: ubuntu-latest
-
     steps:
-      - uses: actions/checkout@v4
-
-      - uses: pnpm/action-setup@v4
+      - uses: actions/checkout@v7
         with:
-          version: 9
-
-      - uses: actions/setup-node@v4
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v6.0.9
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: pnpm
-
       - run: pnpm install --frozen-lockfile
-
-      - run: pnpm run lint
       - run: pnpm run fmt:check
-      - run: pnpm run build
+      - run: pnpm run lint
+      - if: github.event_name == 'pull_request'
+        # release-please derives versions and the changelog from these messages,
+        # so a non-conventional commit silently costs a release entry.
+        run: pnpm exec commitlint --from ${{ github.event.pull_request.base.sha }} --to ${{ github.event.pull_request.head.sha }} --verbose
+
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        # Latest of each supported line. `packed-consumer` runs at the exact
+        # `engines` floor against the published artifact.
+        node: [22, 24]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6.0.9
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ matrix.node }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run typecheck
       - run: pnpm run test
+
+  packed-consumer:
+    # Installs the packed tarball into an empty project so the published
+    # dependency set is exercised instead of this repository's devDependencies.
+    # Catches entry points that import a package we never declared.
+    #
+    # Runs at the exact `engines` floor, so the floor is proven rather than
+    # assumed — the dev toolchain (vitest, oxlint) cannot run this low.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6.0.9
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run build
+      - name: Pack the publishable artifact
+        # npm, not pnpm: pnpm pack has no --ignore-scripts, and prepack would
+        # re-run the check suite the other jobs already cover.
+        run: npm pack --ignore-scripts --pack-destination "$RUNNER_TEMP"
+      - name: Validate package metadata and type resolution
+        run: |
+          pnpm exec publint "$RUNNER_TEMP"/rollup-plugin-electron-run-*.tgz --strict
+          pnpm exec attw "$RUNNER_TEMP"/rollup-plugin-electron-run-*.tgz --profile esm-only
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 18
+      - name: Install it into an empty project
+        working-directory: ${{ runner.temp }}
+        # npm installs peer dependencies by default, so a missing declaration
+        # surfaces here as a load failure below rather than as a warning.
+        # electron and rollup are optional-at-runtime peers, so neither is
+        # installed: the entry points must load without them.
+        run: |
+          mkdir consumer && cd consumer
+          npm init -y >/dev/null
+          npm install --legacy-peer-deps "$RUNNER_TEMP"/rollup-plugin-electron-run-*.tgz
+      - name: The entry points load and the runner is constructible
+        working-directory: ${{ runner.temp }}/consumer
+        run: |
+          cat > probe.mjs <<'EOF'
+          const index = await import("rollup-plugin-electron-run");
+          const plugin = await import("rollup-plugin-electron-run/rollup-plugin");
+          if (typeof index.createElectronRunner !== "function") {
+            throw new Error("index entry point is missing createElectronRunner");
+          }
+          if (typeof plugin.default !== "function") {
+            throw new Error("rollup-plugin entry point is missing its default export");
+          }
+          // Constructing must not reach for electron: resolution is deferred to
+          // the first launch, which is what makes the peer dependency optional
+          // for anyone who only imports the plugin.
+          const runner = index.createElectronRunner({ cwd: process.cwd() });
+          if (typeof runner.scheduleRestart !== "function" || typeof runner.close !== "function") {
+            throw new Error("createElectronRunner did not return a runner");
+          }
+          await runner.close();
+          EOF
+          node probe.mjs
+
+  required:
+    # One stable check name for branch protection. Matrix job names necessarily
+    # change as supported Node lines advance.
+    if: always()
+    needs: [lint, test, packed-consumer]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify every required job succeeded
+        env:
+          LINT: ${{ needs.lint.result }}
+          TEST: ${{ needs.test.result }}
+          PACKED_CONSUMER: ${{ needs.packed-consumer.result }}
+        run: |
+          for result in "$LINT" "$TEST" "$PACKED_CONSUMER"; do
+            test "$result" = success
+          done

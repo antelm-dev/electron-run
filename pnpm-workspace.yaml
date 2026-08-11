@@ -1,0 +1,8 @@
+# pnpm 10+ reads its settings from here rather than the package.json `pnpm` field.
+allowBuilds:
+  # vitest's bundler needs its platform binary.
+  esbuild: true
+  # electron is a peer dependency that is never imported: only the binary path
+  # it exports is resolved, and the tests mock that away. Skipping its
+  # postinstall keeps a 100+ MB download out of every install.
+  electron: false
