@@ -4,7 +4,9 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createLogger } from "../src/logger.js";
 import {
+  isReclaimable,
   listPidFiles,
+  pidDir,
   pidFilePath,
   readPidInfo,
   removePidFile,
@@ -70,7 +72,42 @@ describe("writePidFile / readPidInfo", () => {
   });
 });
 
+describe("pidDir", () => {
+  it("keeps pid files out of the project root", () => {
+    expect(pidDir(dir)).toBe(path.resolve(dir, "node_modules", ".cache", "electron-run"));
+  });
+});
+
+describe("isReclaimable", () => {
+  it("claims files written by this runner", () => {
+    expect(isReclaimable(pidFilePath(dir, 1, process.pid))).toBe(true);
+  });
+
+  it("claims orphans left by a runner that is gone", () => {
+    vi.spyOn(process, "kill").mockImplementation(() => {
+      const error = new Error("no such process") as NodeJS.ErrnoException;
+      error.code = "ESRCH";
+      throw error;
+    });
+
+    expect(isReclaimable(pidFilePath(dir, 1, 4_242))).toBe(true);
+  });
+
+  it("leaves files owned by another live runner alone", () => {
+    vi.spyOn(process, "kill").mockReturnValue(true);
+    expect(isReclaimable(pidFilePath(dir, 1, 4_242))).toBe(false);
+  });
+
+  it("ignores files it cannot attribute", () => {
+    expect(isReclaimable(path.join(dir, "electron-run-note.json"))).toBe(false);
+  });
+});
+
 describe("listPidFiles", () => {
+  it("returns an empty list when the directory does not exist", () => {
+    expect(listPidFiles(path.join(dir, "missing"))).toEqual([]);
+  });
+
   it("lists only matching pid files", () => {
     writePidFile(pidFilePath(dir, 1, 1), launchContext, 1, "t");
     writePidFile(pidFilePath(dir, 2, 2), launchContext, 2, "t");

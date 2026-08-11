@@ -1,9 +1,17 @@
 import cp, { type ChildProcess } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { COMMANDS, DEFAULT_DEBOUNCE_MS, DEFAULT_ENTRY } from "./constants.js";
+import { COMMANDS, DEFAULT_DEBOUNCE_MS, DEFAULT_ENTRY, KILL_TIMEOUT_MS } from "./constants.js";
 import { createLogger } from "./logger.js";
-import { listPidFiles, pidFilePath, readPidInfo, removePidFile, writePidFile } from "./pid-file.js";
+import {
+  isReclaimable,
+  listPidFiles,
+  pidDir,
+  pidFilePath,
+  readPidInfo,
+  removePidFile,
+  writePidFile,
+} from "./pid-file.js";
 import { clearTerminal, killTree, resolveElectronBinary } from "./process.js";
 import { createTaskQueue } from "./task-queue.js";
 import type { BundleOutputLocation, Command, ElectronRunOptions, LaunchContext } from "./types.js";
@@ -18,6 +26,27 @@ export interface ElectronRunner {
   close(): Promise<void>;
 }
 
+/** Resolve `true` when the child exits before `timeoutMs`, `false` on timeout. */
+function waitForExit(child: ChildProcess, timeoutMs: number): Promise<boolean> {
+  if (child.exitCode !== null || child.signalCode !== null) {
+    return Promise.resolve(true);
+  }
+
+  return new Promise((resolve) => {
+    const onExit = () => {
+      clearTimeout(timer);
+      resolve(true);
+    };
+
+    const timer = setTimeout(() => {
+      child.off("exit", onExit);
+      resolve(false);
+    }, timeoutMs);
+
+    child.once("exit", onExit);
+  });
+}
+
 export function createElectronRunner(options: ElectronRunOptions = {}): ElectronRunner {
   const entry = options.entry ?? DEFAULT_ENTRY;
   const debounceMs = options.debounceMs ?? DEFAULT_DEBOUNCE_MS;
@@ -28,6 +57,7 @@ export function createElectronRunner(options: ElectronRunOptions = {}): Electron
   const clearScreen = options.clearScreen ?? false;
   const logger = options.logger ?? createLogger("electron-run");
   const electronBinary = options.electronPath;
+  const pidsDir = pidDir(cwd);
 
   const enqueue = createTaskQueue();
 
@@ -39,20 +69,37 @@ export function createElectronRunner(options: ElectronRunOptions = {}): Electron
   let stdinRegistered = false;
   let isShuttingDown = false;
 
+  /** Ask the process tree to exit, then force it if it outlives the timeout. */
+  async function terminate(child: ChildProcess) {
+    if (!child.pid || child.exitCode !== null || child.signalCode !== null) {
+      return;
+    }
+
+    await killTree(child.pid);
+    if (await waitForExit(child, KILL_TIMEOUT_MS)) {
+      return;
+    }
+
+    logger.warn(`Electron (pid ${child.pid}) ignored SIGTERM, forcing it down`);
+    await killTree(child.pid, "SIGKILL");
+    await waitForExit(child, KILL_TIMEOUT_MS);
+  }
+
   async function stopElectronProcess() {
-    const knownPidFiles = new Set(listPidFiles(cwd));
+    const child = currentProcess;
+    const knownPidFiles = new Set(listPidFiles(pidsDir).filter(isReclaimable));
 
     if (currentPidFile) {
       knownPidFiles.add(currentPidFile);
     }
 
-    if (currentProcess?.pid) {
-      await killTree(currentProcess.pid);
+    if (child) {
+      await terminate(child);
     }
 
     for (const pidFile of knownPidFiles) {
       const info = readPidInfo(pidFile, logger);
-      if (info?.pid && info.pid !== currentProcess?.pid) {
+      if (info?.pid && info.pid !== child?.pid) {
         await killTree(info.pid);
       }
       removePidFile(pidFile, logger);
@@ -76,15 +123,17 @@ export function createElectronRunner(options: ElectronRunOptions = {}): Electron
       return null;
     }
 
-    const pidFile = pidFilePath(context.cwd, Date.now(), process.pid);
+    const pidFile = pidFilePath(pidsDir, Date.now(), process.pid);
 
     const child = cp.spawn(
       electronBinary ?? resolveElectronBinary(),
       [...context.additionalArgs, context.entryFile],
       {
         cwd: context.cwd,
-        stdio: "inherit",
-        detached: false,
+        // stdin stays with the runner, which reads it for the interactive commands.
+        stdio: ["ignore", "inherit", "inherit"],
+        // Own process group on POSIX, so killTree reaches Electron's helper processes.
+        detached: process.platform !== "win32",
         shell: false,
         env: { ...process.env, ...context.env },
       },
@@ -152,7 +201,7 @@ export function createElectronRunner(options: ElectronRunOptions = {}): Electron
 
     process.once("exit", () => {
       clearTimeout(restartTimer);
-      for (const pidFile of listPidFiles(cwd)) {
+      for (const pidFile of listPidFiles(pidsDir).filter(isReclaimable)) {
         removePidFile(pidFile, logger);
       }
     });
@@ -267,6 +316,11 @@ export function createElectronRunner(options: ElectronRunOptions = {}): Electron
     async close() {
       clearTimeout(restartTimer);
       await enqueue(() => stopElectronProcess());
+
+      // Release stdin, otherwise the resumed stream keeps the event loop alive.
+      if (stdinRegistered) {
+        process.stdin.pause();
+      }
     },
   };
 }

@@ -29,12 +29,12 @@ export function createLogger(label: string, level: LogLevel = "info"): LoggerLik
     }
 
     return (...args: unknown[]) => {
-      const timestamp = new Date().toLocaleTimeString('en-US', {
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit',
+      const timestamp = new Date().toLocaleTimeString("en-US", {
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
         hour12: false,
-        hourCycle: 'h23',
+        hourCycle: "h23",
       });
       console[logLevel](`\x1b[${COLORS[logLevel]}m${timestamp} [${label}]\x1b[0m`, ...args);
     };

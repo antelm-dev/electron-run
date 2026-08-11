@@ -1,6 +1,6 @@
 import cp from "node:child_process";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { clearTerminal, killTree } from "../src/process.js";
+import { clearTerminal, isProcessAlive, killTree } from "../src/process.js";
 
 const originalPlatform = process.platform;
 
@@ -35,13 +35,39 @@ describe("killTree", () => {
     );
   });
 
-  it("sends SIGTERM on posix platforms", async () => {
+  it("signals the whole process group on posix platforms", async () => {
     setPlatform("linux");
     const kill = vi.spyOn(process, "kill").mockReturnValue(true);
 
     await killTree(555);
 
-    expect(kill).toHaveBeenCalledWith(555, "SIGTERM");
+    expect(kill).toHaveBeenCalledWith(-555, "SIGTERM");
+  });
+
+  it("forwards an explicit signal", async () => {
+    setPlatform("linux");
+    const kill = vi.spyOn(process, "kill").mockReturnValue(true);
+
+    await killTree(555, "SIGKILL");
+
+    expect(kill).toHaveBeenCalledWith(-555, "SIGKILL");
+  });
+
+  it("falls back to the bare pid when there is no process group", async () => {
+    setPlatform("linux");
+    const kill = vi.spyOn(process, "kill").mockImplementation((pid) => {
+      if (pid < 0) {
+        const error = new Error("no such group") as NodeJS.ErrnoException;
+        error.code = "ESRCH";
+        throw error;
+      }
+      return true;
+    });
+
+    await killTree(555);
+
+    expect(kill).toHaveBeenNthCalledWith(1, -555, "SIGTERM");
+    expect(kill).toHaveBeenNthCalledWith(2, 555, "SIGTERM");
   });
 
   it("tolerates an already-dead process (ESRCH)", async () => {
@@ -64,6 +90,32 @@ describe("killTree", () => {
     });
 
     await expect(killTree(1)).rejects.toThrow("not permitted");
+  });
+});
+
+describe("isProcessAlive", () => {
+  it("recognises the current process", () => {
+    expect(isProcessAlive(process.pid)).toBe(true);
+  });
+
+  it("reports a dead process", () => {
+    vi.spyOn(process, "kill").mockImplementation(() => {
+      const error = new Error("no such process") as NodeJS.ErrnoException;
+      error.code = "ESRCH";
+      throw error;
+    });
+
+    expect(isProcessAlive(4_242)).toBe(false);
+  });
+
+  it("treats EPERM as alive", () => {
+    vi.spyOn(process, "kill").mockImplementation(() => {
+      const error = new Error("not permitted") as NodeJS.ErrnoException;
+      error.code = "EPERM";
+      throw error;
+    });
+
+    expect(isProcessAlive(1)).toBe(true);
   });
 });
 

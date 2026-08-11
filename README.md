@@ -4,7 +4,8 @@ Live-reload for Electron during development. Drop it into a Rollup watch config 
 
 ## Features
 
-- Rollup plugin that restarts Electron on each bundle write (debounced)
+- Rollup plugin that restarts Electron on each bundle write (debounced), inert outside watch mode
+- Waits for the previous process to actually exit before relaunching, escalating to `SIGKILL` if needed
 - Tracks running processes via pid files and kills the whole process tree on exit
 - Interactive stdin commands: `rs`, `start`, `stop`, `status`, `clear`, `help`
 - Clean shutdown on `SIGINT` / `SIGTERM` / `SIGHUP`
@@ -13,7 +14,7 @@ Live-reload for Electron during development. Drop it into a Rollup watch config 
 ## Installation
 
 ```bash
-npm install --save-dev electron-run
+npm install --save-dev rollup-plugin-electron-run
 ```
 
 **Peer dependencies:** `electron` (provided by your app) and `rollup >= 4` (only if you use the plugin).
@@ -24,7 +25,7 @@ npm install --save-dev electron-run
 
 ```js
 // rollup.config.mjs
-import electronRun from "electron-run";
+import electronRun from "rollup-plugin-electron-run";
 
 export default {
   input: "src/main.ts",
@@ -39,12 +40,14 @@ export default {
 };
 ```
 
-Run Rollup in watch mode (`rollup -c -w`). Each rebuild relaunches Electron; press <kbd>Ctrl</kbd>+<kbd>C</kbd> to stop everything.
+Run Rollup in watch mode (`rollup -c -w`). Each rebuild relaunches Electron; press <kbd>Ctrl</kbd>+<kbd>C</kbd> to stop everything. A plain `rollup -c` build is unaffected — the plugin only starts Electron in watch mode.
 
-The plugin is also available at the `electron-run/rollup-plugin` entry point:
+Running processes are tracked through pid files under `node_modules/.cache/electron-run/`, so a crashed watcher can't leave Electron behind. Files written by another _running_ watcher are left alone, which keeps concurrent watchers (monorepos, two terminals) from killing each other.
+
+The plugin is also available at the `rollup-plugin-electron-run/rollup-plugin` entry point:
 
 ```js
-import electronRun from "electron-run/rollup-plugin";
+import electronRun from "rollup-plugin-electron-run/rollup-plugin";
 ```
 
 ### Standalone runner
@@ -52,7 +55,7 @@ import electronRun from "electron-run/rollup-plugin";
 Use the runner directly if you drive rebuilds yourself (e.g. with esbuild or a custom watcher):
 
 ```ts
-import { createElectronRunner } from "electron-run";
+import { createElectronRunner } from "rollup-plugin-electron-run";
 
 const runner = createElectronRunner({
   entry: "main.js",
