@@ -19,7 +19,7 @@ describe("killTree", () => {
     await expect(killTree(undefined)).resolves.toBeUndefined();
   });
 
-  it("uses taskkill on win32", async () => {
+  it("uses non-forceful taskkill first on win32", async () => {
     setPlatform("win32");
     const execFile = vi.spyOn(cp, "execFile").mockImplementation(((...callArgs: unknown[]) => {
       const cb = callArgs.at(-1) as (err: Error | null) => void;
@@ -29,11 +29,35 @@ describe("killTree", () => {
 
     await killTree(4242);
 
+    expect(execFile).toHaveBeenCalledWith("taskkill", ["/pid", "4242", "/T"], expect.any(Function));
+  });
+
+  it("adds /F only for a forceful Windows termination", async () => {
+    setPlatform("win32");
+    const execFile = vi.spyOn(cp, "execFile").mockImplementation(((...callArgs: unknown[]) => {
+      const cb = callArgs.at(-1) as (err: Error | null) => void;
+      cb(null);
+      return {};
+    }) as never);
+
+    await killTree(4242, "SIGKILL");
     expect(execFile).toHaveBeenCalledWith(
       "taskkill",
       ["/pid", "4242", "/T", "/F"],
       expect.any(Function),
     );
+  });
+
+  it("rejects an unexpected taskkill failure while the process is alive", async () => {
+    setPlatform("win32");
+    vi.spyOn(process, "kill").mockReturnValue(true);
+    vi.spyOn(cp, "execFile").mockImplementation(((...callArgs: unknown[]) => {
+      const cb = callArgs.at(-1) as (err: Error | null) => void;
+      cb(new Error("access denied"));
+      return {};
+    }) as never);
+
+    await expect(killTree(4242)).rejects.toThrow("access denied");
   });
 
   it("signals the whole process group on posix platforms", async () => {
@@ -126,6 +150,13 @@ describe("isProcessAlive", () => {
     });
 
     expect(isProcessAlive(1)).toBe(true);
+  });
+
+  it("rejects invalid pids without signalling", () => {
+    const kill = vi.spyOn(process, "kill");
+    expect(isProcessAlive(-1)).toBe(false);
+    expect(isProcessAlive(Number.NaN)).toBe(false);
+    expect(kill).not.toHaveBeenCalled();
   });
 });
 

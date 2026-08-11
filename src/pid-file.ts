@@ -48,7 +48,24 @@ export function isReclaimable(filePath: string): boolean {
 /** Read and parse a pid file, returning `null` on any read/parse failure. */
 export function readPidInfo(filePath: string, logger: LoggerLike): PidInfo | null {
   try {
-    return JSON.parse(fs.readFileSync(filePath, "utf-8")) as PidInfo;
+    const info = JSON.parse(fs.readFileSync(filePath, "utf-8")) as Partial<PidInfo>;
+    if (
+      !Number.isSafeInteger(info.pid) ||
+      (info.pid ?? 0) <= 0 ||
+      typeof info.startedAt !== "string" ||
+      !Number.isFinite(Date.parse(info.startedAt)) ||
+      typeof info.entry !== "string" ||
+      !path.isAbsolute(info.entry) ||
+      !Array.isArray(info.args) ||
+      !info.args.every((arg) => typeof arg === "string") ||
+      typeof info.cwd !== "string" ||
+      !path.isAbsolute(info.cwd) ||
+      typeof info.identity !== "string" ||
+      info.identity.length === 0
+    ) {
+      throw new Error("Invalid pid file contents");
+    }
+    return info as PidInfo;
   } catch (error) {
     logger.warn(`Error reading pid file: ${filePath}`, error);
     return null;
@@ -73,6 +90,7 @@ export function writePidFile(
   context: LaunchContext,
   pid: number,
   startedAt: string,
+  identity: string,
 ): void {
   const info: PidInfo = {
     pid,
@@ -80,6 +98,7 @@ export function writePidFile(
     entry: context.entryFile,
     args: context.additionalArgs,
     cwd: context.cwd,
+    identity,
   };
 
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
