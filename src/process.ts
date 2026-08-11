@@ -1,14 +1,37 @@
 import cp from "node:child_process";
 import { createRequire } from "node:module";
-
-const require = createRequire(import.meta.url);
+import path from "node:path";
 
 /** ANSI sequence that clears the screen and the scrollback buffer. */
 const CLEAR_SEQUENCE = "\x1b[2J\x1b[3J\x1b[H";
 
-/** Resolve the absolute path to the Electron binary via the `electron` package. */
-export function resolveElectronBinary(): string {
-  return require("electron") as string;
+/**
+ * Resolve the absolute path to the Electron binary via the `electron` package.
+ *
+ * Resolution starts from the consuming project: `electron` is a peer dependency,
+ * so under strict pnpm (or when this package is linked) it isn't reachable from
+ * this package's own directory. Falling back to a self-relative lookup keeps
+ * flat/hoisted layouts working.
+ */
+export function resolveElectronBinary(cwd: string = process.cwd()): string {
+  for (const from of [path.resolve(cwd, "package.json"), import.meta.url]) {
+    const require = createRequire(from);
+
+    try {
+      require.resolve("electron");
+    } catch {
+      // Not installed under this base — try the next one.
+      continue;
+    }
+
+    // Resolution succeeded, so let the package speak for itself: a half-installed
+    // Electron reports a much more useful error than anything we could invent.
+    return require("electron") as string;
+  }
+
+  throw new Error(
+    "Cannot resolve the `electron` package. Install it in your project, or set the `electronPath` option.",
+  );
 }
 
 /**
