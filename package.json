@@ -50,6 +50,8 @@
     "fmt": "oxfmt .",
     "fmt:check": "oxfmt --check .",
     "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "test:lifecycle": "vitest run --config vitest.lifecycle.config.ts",
     "test:watch": "vitest",
     "check": "pnpm run fmt:check && pnpm run lint && pnpm run typecheck && pnpm run test",
     "prepack": "pnpm run check && pnpm run build"
@@ -59,14 +61,14 @@
     "@commitlint/cli": "^21.2.1",
     "@commitlint/config-conventional": "^21.2.0",
     "@types/node": "^22.8.6",
-    "electron": "^40.8.0",
+    "@vitest/coverage-v8": "4.1.10",
+    "electron": "41.10.3",
     "oxfmt": "^0.57.0",
     "oxlint": "^1.72.0",
     "publint": "0.3.23",
     "rollup": "^4.17.2",
     "typescript": "^5.8.3",
-    "vite": "^7.3.6",
-    "vitest": "^4.1.9"
+    "vitest": "^4.1.10"
   },
   "peerDependencies": {
     "electron": ">=20.0.0",
