@@ -5,20 +5,46 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const { killTree } = vi.hoisted(() => ({ killTree: vi.fn(async () => {}) }));
+const { killTree, spawned } = vi.hoisted(() => {
+  const spawned: { pid: number; emit(event: string, ...args: unknown[]): boolean }[] = [];
+
+  // A signal only *asks* the process to go away: killTree resolves right away and
+  // "exit" lands a tick later. The runner must wait for it before relaunching.
+  return {
+    spawned,
+    killTree: vi.fn(async (pid: number) => {
+      for (const child of spawned) {
+        if (child.pid === pid) {
+          setTimeout(() => child.emit("exit", 0, null), 5);
+        }
+      }
+    }),
+  };
+});
 
 vi.mock("../src/process.js", () => ({
   resolveElectronBinary: () => "electron-binary",
   killTree,
   clearTerminal: vi.fn(),
+  isProcessAlive: () => false,
 }));
 
 import { createElectronRunner } from "../src/core.js";
-import { listPidFiles } from "../src/pid-file.js";
+import { listPidFiles, pidDir } from "../src/pid-file.js";
 import type { LoggerLike } from "../src/logger.js";
 
 class FakeChild extends EventEmitter {
   pid = 12_345;
+  exitCode: number | null = null;
+  signalCode: NodeJS.Signals | null = null;
+
+  constructor() {
+    super();
+    spawned.push(this);
+    this.once("exit", (code: number) => {
+      this.exitCode = code;
+    });
+  }
 }
 
 function captureLogger() {
@@ -43,6 +69,7 @@ let cwd: string;
 let outDir: string;
 
 beforeEach(() => {
+  spawned.length = 0;
   cwd = fs.mkdtempSync(path.join(os.tmpdir(), "electron-run-cwd-"));
   outDir = fs.mkdtempSync(path.join(os.tmpdir(), "electron-run-out-"));
 });
@@ -94,11 +121,53 @@ describe("createElectronRunner", () => {
     const [bin, args] = spawn.mock.calls[0];
     expect(bin).toBe("electron-binary");
     expect(args).toEqual(["--inspect", path.resolve(outDir, "main.js")]);
-    expect(listPidFiles(cwd)).toHaveLength(1);
+    expect(listPidFiles(pidDir(cwd))).toHaveLength(1);
 
     await runner.close();
     expect(killTree).toHaveBeenCalledWith(child.pid);
-    expect(listPidFiles(cwd)).toHaveLength(0);
+    expect(listPidFiles(pidDir(cwd))).toHaveLength(0);
+  });
+
+  it("keeps the project root clean by writing pid files under node_modules/.cache", async () => {
+    fs.writeFileSync(path.join(outDir, "main.js"), "// entry", "utf-8");
+    vi.spyOn(cp, "spawn").mockReturnValue(new FakeChild() as never);
+    const { logger } = captureLogger();
+
+    const runner = createElectronRunner({ cwd, debounceMs: 1, stdinControls: false, logger });
+    runner.scheduleRestart({ dir: outDir });
+    await flush();
+
+    expect(fs.readdirSync(cwd)).toEqual(["node_modules"]);
+    expect(pidDir(cwd)).toBe(path.resolve(cwd, "node_modules/.cache/electron-run"));
+
+    await runner.close();
+  });
+
+  it("waits for the previous process to exit before relaunching", async () => {
+    fs.writeFileSync(path.join(outDir, "main.js"), "// entry", "utf-8");
+    const first = new FakeChild();
+    const second = new FakeChild();
+    second.pid = 999;
+    const events: string[] = [];
+    first.once("exit", () => events.push("first exited"));
+
+    const spawn = vi.spyOn(cp, "spawn").mockImplementation((() => {
+      const child = spawn.mock.calls.length === 1 ? first : second;
+      events.push(`spawned ${child.pid}`);
+      return child;
+    }) as never);
+
+    const { logger } = captureLogger();
+    const runner = createElectronRunner({ cwd, debounceMs: 1, stdinControls: false, logger });
+
+    runner.scheduleRestart({ dir: outDir });
+    await flush();
+
+    runner.scheduleRestart({ dir: outDir });
+    await flush();
+
+    expect(events).toEqual(["spawned 12345", "first exited", "spawned 999"]);
+    await runner.close();
   });
 
   it("debounces rapid restart requests into a single launch", async () => {
