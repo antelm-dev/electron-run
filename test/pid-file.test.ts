@@ -45,7 +45,7 @@ describe("pidFilePath", () => {
 describe("writePidFile / readPidInfo", () => {
   it("round-trips a launch snapshot", () => {
     const file = pidFilePath(dir, 1, 2);
-    writePidFile(file, launchContext, 999, "2026-01-01T00:00:00.000Z");
+    writePidFile(file, launchContext, 999, "2026-01-01T00:00:00.000Z", "identity-999");
 
     const info = readPidInfo(file, silentLogger);
     expect(info).toEqual({
@@ -54,6 +54,7 @@ describe("writePidFile / readPidInfo", () => {
       entry: "/project/out/main.js",
       args: ["--inspect"],
       cwd: "/project",
+      identity: "identity-999",
     });
   });
 
@@ -68,6 +69,39 @@ describe("writePidFile / readPidInfo", () => {
   it("returns null on malformed JSON", () => {
     const file = path.join(dir, "electron-run-bad.json");
     fs.writeFileSync(file, "{not json", "utf-8");
+    expect(readPidInfo(file, silentLogger)).toBeNull();
+  });
+
+  it("rejects structurally invalid and unsafe pid records", () => {
+    for (const pid of [-1, 0, 1.5, Number.MAX_SAFE_INTEGER + 1]) {
+      const file = path.join(dir, `electron-run-invalid-${String(pid)}.json`);
+      fs.writeFileSync(
+        file,
+        JSON.stringify({
+          pid,
+          startedAt: "2026-01-01T00:00:00.000Z",
+          entry: "/project/main.js",
+          args: [],
+          cwd: "/project",
+          identity: "identity",
+        }),
+      );
+      expect(readPidInfo(file, silentLogger)).toBeNull();
+    }
+  });
+
+  it("does not trust legacy records without a process identity", () => {
+    const file = path.join(dir, "electron-run-legacy.json");
+    fs.writeFileSync(
+      file,
+      JSON.stringify({
+        pid: 42,
+        startedAt: "2026-01-01T00:00:00.000Z",
+        entry: "/project/main.js",
+        args: [],
+        cwd: "/project",
+      }),
+    );
     expect(readPidInfo(file, silentLogger)).toBeNull();
   });
 });
@@ -109,8 +143,8 @@ describe("listPidFiles", () => {
   });
 
   it("lists only matching pid files", () => {
-    writePidFile(pidFilePath(dir, 1, 1), launchContext, 1, "t");
-    writePidFile(pidFilePath(dir, 2, 2), launchContext, 2, "t");
+    writePidFile(pidFilePath(dir, 1, 1), launchContext, 1, "2026-01-01T00:00:00Z", "one");
+    writePidFile(pidFilePath(dir, 2, 2), launchContext, 2, "2026-01-01T00:00:00Z", "two");
     fs.writeFileSync(path.join(dir, "unrelated.json"), "{}", "utf-8");
     fs.writeFileSync(path.join(dir, "electron-run-note.txt"), "x", "utf-8");
 
@@ -125,7 +159,7 @@ describe("listPidFiles", () => {
 describe("removePidFile", () => {
   it("deletes an existing file", () => {
     const file = pidFilePath(dir, 3, 3);
-    writePidFile(file, launchContext, 3, "t");
+    writePidFile(file, launchContext, 3, "2026-01-01T00:00:00Z", "three");
     removePidFile(file, silentLogger);
     expect(fs.existsSync(file)).toBe(false);
   });

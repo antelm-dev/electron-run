@@ -12,7 +12,13 @@ import {
   removePidFile,
   writePidFile,
 } from "./pid-file.js";
-import { clearTerminal, killTree, resolveElectronBinary } from "./process.js";
+import {
+  clearTerminal,
+  getProcessIdentity,
+  isProcessAlive,
+  killTree,
+  resolveElectronBinary,
+} from "./process.js";
 import { createTaskQueue } from "./task-queue.js";
 import type { BundleOutputLocation, Command, ElectronRunOptions, LaunchContext } from "./types.js";
 
@@ -25,6 +31,14 @@ export interface ElectronRunner {
   /** Stop the running process and flush the queue. */
   close(): Promise<void>;
 }
+
+interface StdinOwnership {
+  activeRunners: number;
+  wasOriginallyFlowing: boolean;
+}
+
+/** Coordinate ownership when multiple runners share the same stdin stream. */
+const stdinOwnership = new WeakMap<object, StdinOwnership>();
 
 /** Resolve `true` when the child exits before `timeoutMs`, `false` on timeout. */
 function waitForExit(child: ChildProcess, timeoutMs: number): Promise<boolean> {
@@ -45,6 +59,14 @@ function waitForExit(child: ChildProcess, timeoutMs: number): Promise<boolean> {
 
     child.once("exit", onExit);
   });
+}
+
+async function waitForPidExit(pid: number, timeoutMs: number): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (isProcessAlive(pid) && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  return !isProcessAlive(pid);
 }
 
 export function createElectronRunner(options: ElectronRunOptions = {}): ElectronRunner {
@@ -72,50 +94,86 @@ export function createElectronRunner(options: ElectronRunOptions = {}): Electron
 
   let restartTimer: ReturnType<typeof setTimeout> | undefined;
   let currentProcess: ChildProcess | null = null;
-  let currentPidFile: string | null = null;
   let lastLaunchContext: LaunchContext | null = null;
   let shutdownRegistered = false;
   let stdinRegistered = false;
+  let registeredStdin: typeof process.stdin | null = null;
+  let stdinOwnershipClaimed = false;
   let isShuttingDown = false;
+  let closed = false;
+  let closePromise: Promise<void> | null = null;
+
+  const signalHandlers = new Map<NodeJS.Signals, () => void>();
 
   /** Ask the process tree to exit, then force it if it outlives the timeout. */
-  async function terminate(child: ChildProcess) {
+  async function terminate(child: ChildProcess): Promise<void> {
     if (!child.pid || child.exitCode !== null || child.signalCode !== null) {
       return;
     }
 
-    await killTree(child.pid);
+    try {
+      await killTree(child.pid);
+    } catch (error) {
+      logger.warn(`Graceful Electron termination failed for pid ${child.pid}`, error);
+    }
     if (await waitForExit(child, KILL_TIMEOUT_MS)) {
       return;
     }
 
     logger.warn(`Electron (pid ${child.pid}) ignored SIGTERM, forcing it down`);
     await killTree(child.pid, "SIGKILL");
-    await waitForExit(child, KILL_TIMEOUT_MS);
+    if (!(await waitForExit(child, KILL_TIMEOUT_MS))) {
+      throw new Error(`Electron (pid ${child.pid}) did not exit after SIGKILL`);
+    }
+  }
+
+  async function terminateRecoveredPid(pid: number): Promise<void> {
+    try {
+      await killTree(pid);
+    } catch (error) {
+      logger.warn(`Graceful recovered-process termination failed for pid ${pid}`, error);
+    }
+    if (await waitForPidExit(pid, KILL_TIMEOUT_MS)) {
+      return;
+    }
+    logger.warn(`Recovered Electron (pid ${pid}) ignored SIGTERM, forcing it down`);
+    await killTree(pid, "SIGKILL");
+    if (!(await waitForPidExit(pid, KILL_TIMEOUT_MS))) {
+      throw new Error(`Recovered Electron (pid ${pid}) did not exit after SIGKILL`);
+    }
   }
 
   async function stopElectronProcess() {
     const child = currentProcess;
-    const knownPidFiles = new Set(listPidFiles(pidsDir).filter(isReclaimable));
-
-    if (currentPidFile) {
-      knownPidFiles.add(currentPidFile);
-    }
-
     if (child) {
       await terminate(child);
-    }
-
-    for (const pidFile of knownPidFiles) {
-      const info = readPidInfo(pidFile, logger);
-      if (info?.pid && info.pid !== child?.pid) {
-        await killTree(info.pid);
+      if (child.exitCode === null && child.signalCode === null) {
+        throw new Error(`Electron (pid ${child.pid}) termination was not confirmed`);
       }
-      removePidFile(pidFile, logger);
     }
 
     currentProcess = null;
-    currentPidFile = null;
+    for (const pidFile of listPidFiles(pidsDir).filter(isReclaimable)) {
+      const info = readPidInfo(pidFile, logger);
+      if (!info) {
+        removePidFile(pidFile, logger);
+        continue;
+      }
+
+      if (!isProcessAlive(info.pid)) {
+        removePidFile(pidFile, logger);
+        continue;
+      }
+
+      const identity = await getProcessIdentity(info.pid);
+      if (!identity || identity !== info.identity) {
+        logger.warn(`Refusing to reclaim pid ${info.pid}: process identity does not match`);
+        continue;
+      }
+
+      await terminateRecoveredPid(info.pid);
+      removePidFile(pidFile, logger);
+    }
   }
 
   function maybeClearTerminal() {
@@ -124,7 +182,7 @@ export function createElectronRunner(options: ElectronRunOptions = {}): Electron
     }
   }
 
-  function startElectronProcess(context: LaunchContext): ChildProcess | null {
+  async function startElectronProcess(context: LaunchContext): Promise<ChildProcess | null> {
     maybeClearTerminal();
 
     if (!fs.existsSync(context.entryFile)) {
@@ -148,14 +206,9 @@ export function createElectronRunner(options: ElectronRunOptions = {}): Electron
       },
     );
 
-    currentProcess = child;
-    currentPidFile = pidFile;
-    writePidFile(pidFile, context, child.pid ?? 0, new Date().toISOString());
-
     const detach = () => {
       if (currentProcess === child) {
         currentProcess = null;
-        currentPidFile = null;
       }
       removePidFile(pidFile, logger);
     };
@@ -174,6 +227,43 @@ export function createElectronRunner(options: ElectronRunOptions = {}): Electron
       logger.error("Unable to launch Electron", error);
     });
 
+    currentProcess = child;
+
+    try {
+      let identity: string | null = null;
+      const identityDeadline = Date.now() + 1_000;
+      while (
+        child.pid &&
+        !identity &&
+        currentProcess === child &&
+        child.exitCode === null &&
+        child.signalCode === null &&
+        Date.now() < identityDeadline
+      ) {
+        identity = await getProcessIdentity(child.pid);
+        if (!identity) {
+          await new Promise((resolve) => setTimeout(resolve, 25));
+        }
+      }
+      if (currentProcess !== child) {
+        return null;
+      }
+      if (!identity) {
+        throw new Error("Unable to establish Electron process identity");
+      }
+      if (child.exitCode !== null || child.signalCode !== null) {
+        return null;
+      }
+      writePidFile(pidFile, context, child.pid!, new Date().toISOString(), identity);
+    } catch (error) {
+      try {
+        await terminate(child);
+      } catch (terminationError) {
+        logger.error("Unable to roll back unpersisted Electron process", terminationError);
+      }
+      throw error;
+    }
+
     return child;
   }
 
@@ -181,7 +271,7 @@ export function createElectronRunner(options: ElectronRunOptions = {}): Electron
     lastLaunchContext = context;
     logger.info(`Restarting Electron (${reason})`);
     await stopElectronProcess();
-    startElectronProcess(context);
+    await startElectronProcess(context);
   }
 
   function registerShutdown() {
@@ -198,22 +288,28 @@ export function createElectronRunner(options: ElectronRunOptions = {}): Electron
 
       isShuttingDown = true;
       clearTimeout(restartTimer);
-      await stopElectronProcess();
-      process.exit(exitCode);
+      try {
+        await stopElectronProcess();
+      } catch (error) {
+        logger.error("Unable to stop Electron during shutdown", error);
+      } finally {
+        process.exit(exitCode);
+      }
     };
 
     for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"] as const) {
-      process.once(signal, () => {
+      const handler = () => {
         void shutdown(signal === "SIGINT" ? 130 : 0);
-      });
+      };
+      signalHandlers.set(signal, handler);
+      process.once(signal, handler);
     }
 
-    process.once("exit", () => {
-      clearTimeout(restartTimer);
-      for (const pidFile of listPidFiles(pidsDir).filter(isReclaimable)) {
-        removePidFile(pidFile, logger);
-      }
-    });
+    process.once("exit", handleProcessExit);
+  }
+
+  function handleProcessExit() {
+    clearTimeout(restartTimer);
   }
 
   function getLastLaunchContext() {
@@ -267,7 +363,7 @@ export function createElectronRunner(options: ElectronRunOptions = {}): Electron
           return;
         }
 
-        startElectronProcess(context);
+        await startElectronProcess(context);
       });
       return;
     }
@@ -276,28 +372,44 @@ export function createElectronRunner(options: ElectronRunOptions = {}): Electron
   }
 
   function registerStdin() {
-    if (stdinRegistered || !process.stdin.isTTY) {
+    const stdin = process.stdin;
+    if (stdinRegistered || !stdin.isTTY) {
       return;
     }
 
     stdinRegistered = true;
-    process.stdin.setEncoding("utf8");
-    process.stdin.resume();
+    registeredStdin = stdin;
+    let ownership = stdinOwnership.get(stdin);
+    if (!ownership) {
+      ownership = {
+        activeRunners: 0,
+        wasOriginallyFlowing: stdin.readableFlowing === true,
+      };
+      stdinOwnership.set(stdin, ownership);
+    }
+    ownership.activeRunners += 1;
+    stdinOwnershipClaimed = true;
+    stdin.setEncoding("utf8");
+    stdin.resume();
 
-    process.stdin.on("data", (chunk: string) => {
-      const commands = chunk
-        .split(/\r?\n/)
-        .map((value) => value.trim().toLowerCase())
-        .filter((value): value is Command => COMMANDS.has(value as Command));
+    stdin.on("data", handleStdinData);
+  }
 
-      for (const command of commands) {
-        handleCommand(command);
-      }
-    });
+  function handleStdinData(chunk: string) {
+    const commands = chunk
+      .split(/\r?\n/)
+      .map((value) => value.trim().toLowerCase())
+      .filter((value): value is Command => COMMANDS.has(value as Command));
+
+    for (const command of commands) {
+      handleCommand(command);
+    }
   }
 
   function createLaunchContext(output: BundleOutputLocation): LaunchContext {
-    const outDir = output.dir ?? path.dirname(output.file ?? "");
+    const outDir = output.dir
+      ? path.resolve(cwd, output.dir)
+      : path.dirname(output.file ? path.resolve(cwd, output.file) : "");
     const entryFile = path.resolve(outDir || cwd, entry);
 
     return {
@@ -316,20 +428,46 @@ export function createElectronRunner(options: ElectronRunOptions = {}): Electron
 
   return {
     scheduleRestart(output: BundleOutputLocation, reason = "rebuild") {
+      if (closed) {
+        return;
+      }
       clearTimeout(restartTimer);
       restartTimer = setTimeout(() => {
         const context = createLaunchContext(output);
         run(() => restartElectron(context, reason));
       }, debounceMs);
     },
-    async close() {
-      clearTimeout(restartTimer);
-      await enqueue(() => stopElectronProcess());
-
-      // Release stdin, otherwise the resumed stream keeps the event loop alive.
-      if (stdinRegistered) {
-        process.stdin.pause();
+    close() {
+      if (closePromise) {
+        return closePromise;
       }
+      closed = true;
+      clearTimeout(restartTimer);
+
+      for (const [signal, handler] of signalHandlers) {
+        process.off(signal, handler);
+      }
+      signalHandlers.clear();
+      process.off("exit", handleProcessExit);
+      if (stdinRegistered && registeredStdin) {
+        registeredStdin.off("data", handleStdinData);
+        const ownership = stdinOwnership.get(registeredStdin);
+        if (stdinOwnershipClaimed && ownership) {
+          ownership.activeRunners -= 1;
+          if (ownership.activeRunners === 0) {
+            if (!ownership.wasOriginallyFlowing && registeredStdin.listenerCount("data") === 0) {
+              registeredStdin.pause();
+            }
+            stdinOwnership.delete(registeredStdin);
+          }
+        }
+        stdinRegistered = false;
+        registeredStdin = null;
+        stdinOwnershipClaimed = false;
+      }
+
+      closePromise = enqueue(() => stopElectronProcess());
+      return closePromise;
     },
   };
 }

@@ -6,13 +6,15 @@ import path from "node:path";
 import { PassThrough } from "node:stream";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const { killTree, spawned } = vi.hoisted(() => {
+const { getProcessIdentity, isProcessAlive, killTree, spawned } = vi.hoisted(() => {
   const spawned: { pid: number; emit(event: string, ...args: unknown[]): boolean }[] = [];
 
   // A signal only *asks* the process to go away: killTree resolves right away and
   // "exit" lands a tick later. The runner must wait for it before relaunching.
   return {
     spawned,
+    getProcessIdentity: vi.fn(async () => "test-process-identity"),
+    isProcessAlive: vi.fn(() => false),
     killTree: vi.fn(async (pid: number) => {
       for (const child of spawned) {
         if (child.pid === pid) {
@@ -27,11 +29,13 @@ vi.mock("../src/process.js", () => ({
   resolveElectronBinary: () => "electron-binary",
   killTree,
   clearTerminal: vi.fn(),
-  isProcessAlive: () => false,
+  getProcessIdentity,
+  isProcessAlive,
 }));
 
 import { createElectronRunner } from "../src/core.js";
-import { listPidFiles, pidDir } from "../src/pid-file.js";
+import { listPidFiles, pidDir, pidFilePath, writePidFile } from "../src/pid-file.js";
+import type { LaunchContext } from "../src/types.js";
 import type { LoggerLike } from "../src/logger.js";
 
 class FakeChild extends EventEmitter {
@@ -71,6 +75,15 @@ let outDir: string;
 
 beforeEach(() => {
   spawned.length = 0;
+  getProcessIdentity.mockResolvedValue("test-process-identity");
+  isProcessAlive.mockReturnValue(false);
+  killTree.mockImplementation(async (pid: number) => {
+    for (const child of spawned) {
+      if (child.pid === pid) {
+        setTimeout(() => child.emit("exit", 0, null), 5);
+      }
+    }
+  });
   cwd = fs.mkdtempSync(path.join(os.tmpdir(), "electron-run-cwd-"));
   outDir = fs.mkdtempSync(path.join(os.tmpdir(), "electron-run-out-"));
 });
@@ -191,6 +204,103 @@ describe("createElectronRunner", () => {
     expect(spawn).toHaveBeenCalledOnce();
     await runner.close();
   });
+
+  it("resolves relative standalone output paths against the configured cwd", async () => {
+    const relativeOut = path.join("build", "desktop");
+    fs.mkdirSync(path.join(cwd, relativeOut), { recursive: true });
+    fs.writeFileSync(path.join(cwd, relativeOut, "main.js"), "// entry", "utf-8");
+    const spawn = vi.spyOn(cp, "spawn").mockReturnValue(new FakeChild() as never);
+    const { logger } = captureLogger();
+
+    const runner = createElectronRunner({ cwd, debounceMs: 1, stdinControls: false, logger });
+    runner.scheduleRestart({ dir: relativeOut });
+    await flush();
+
+    expect(spawn.mock.calls[0]?.[1]).toEqual([path.join(cwd, relativeOut, "main.js")]);
+    await runner.close();
+  });
+
+  it("keeps the pid record when termination fails", async () => {
+    fs.writeFileSync(path.join(outDir, "main.js"), "// entry", "utf-8");
+    const child = new FakeChild();
+    vi.spyOn(cp, "spawn").mockReturnValue(child as never);
+    killTree.mockImplementationOnce(async () => undefined);
+    killTree.mockRejectedValueOnce(new Error("access denied"));
+    const { logger } = captureLogger();
+    const runner = createElectronRunner({ cwd, debounceMs: 1, stdinControls: false, logger });
+    runner.scheduleRestart({ dir: outDir });
+    await flush();
+
+    await expect(runner.close()).rejects.toThrow("access denied");
+    expect(listPidFiles(pidDir(cwd))).toHaveLength(1);
+
+    child.emit("exit", 1, null);
+  });
+
+  it("retains recovery state in the synchronous process exit handler", async () => {
+    fs.writeFileSync(path.join(outDir, "main.js"), "// entry", "utf-8");
+    const child = new FakeChild();
+    vi.spyOn(cp, "spawn").mockReturnValue(child as never);
+    const before = new Set(process.listeners("exit"));
+    const { logger } = captureLogger();
+    const runner = createElectronRunner({ cwd, debounceMs: 1, stdinControls: false, logger });
+    runner.scheduleRestart({ dir: outDir });
+    await flush();
+
+    const exitHandler = process.listeners("exit").find((handler) => !before.has(handler));
+    expect(exitHandler).toBeDefined();
+    exitHandler?.(1);
+    expect(listPidFiles(pidDir(cwd))).toHaveLength(1);
+
+    await runner.close();
+  });
+
+  it("does not signal a reused pid whose identity does not match", async () => {
+    const recoveredPid = 44_444;
+    const context: LaunchContext = {
+      cwd,
+      env: {},
+      entryFile: path.join(cwd, "dist", "main.js"),
+      additionalArgs: [],
+      clearScreen: false,
+    };
+    const record = pidFilePath(pidDir(cwd), Date.now(), 55_555);
+    writePidFile(record, context, recoveredPid, new Date().toISOString(), "original-identity");
+    isProcessAlive.mockImplementation((pid: number) => pid === recoveredPid);
+    getProcessIdentity.mockResolvedValue("reused-pid-identity");
+    const { logger, messages } = captureLogger();
+    const runner = createElectronRunner({ cwd, debounceMs: 1, stdinControls: false, logger });
+
+    runner.scheduleRestart({ dir: "missing" });
+    await flush();
+
+    expect(killTree).not.toHaveBeenCalled();
+    expect(fs.existsSync(record)).toBe(true);
+    expect(messages.some((message) => message.includes("identity does not match"))).toBe(true);
+    await runner.close();
+  });
+
+  it("rolls back a child when pid persistence fails", async () => {
+    fs.writeFileSync(path.join(outDir, "main.js"), "// entry", "utf-8");
+    const child = new FakeChild();
+    vi.spyOn(cp, "spawn").mockReturnValue(child as never);
+    const writeFileSync = fs.writeFileSync.bind(fs);
+    vi.spyOn(fs, "writeFileSync").mockImplementation((file, ...args) => {
+      if (String(file).includes("electron-run-")) {
+        throw new Error("read only cache");
+      }
+      return writeFileSync(file, ...args);
+    });
+    const { logger, messages } = captureLogger();
+    const runner = createElectronRunner({ cwd, debounceMs: 1, stdinControls: false, logger });
+    runner.scheduleRestart({ dir: outDir });
+    await flush();
+
+    expect(killTree).toHaveBeenCalledWith(child.pid);
+    expect(messages.some((message) => message.includes("read only cache"))).toBe(true);
+    expect(listPidFiles(pidDir(cwd))).toHaveLength(0);
+    await runner.close();
+  });
 });
 
 describe("interactive stdin commands", () => {
@@ -262,5 +372,98 @@ describe("interactive stdin commands", () => {
 
     expect(messages).toEqual([]);
     await runner.close();
+  });
+
+  it("restores paused stdin when the runner was its sole consumer", async () => {
+    attachTty();
+    const { logger } = captureLogger();
+    const runner = createElectronRunner({ cwd, debounceMs: 1, logger });
+
+    expect(stdin.readableFlowing).toBe(true);
+    expect(stdin.listenerCount("data")).toBe(1);
+
+    await runner.close();
+
+    expect(stdin.isPaused()).toBe(true);
+    expect(stdin.listenerCount("data")).toBe(0);
+  });
+
+  it("close preserves flowing stdin owned by an unrelated consumer", async () => {
+    attachTty();
+    const unrelated = vi.fn();
+    stdin.on("data", unrelated);
+    const pause = vi.spyOn(stdin, "pause");
+    const initialSignals = new Map(
+      (["SIGINT", "SIGTERM", "SIGHUP"] as const).map((signal) => [
+        signal,
+        process.listenerCount(signal),
+      ]),
+    );
+    const { logger } = captureLogger();
+    const spawn = vi.spyOn(cp, "spawn");
+    const runner = createElectronRunner({ cwd, debounceMs: 1, logger });
+
+    await runner.close();
+    await runner.close();
+    runner.scheduleRestart({ dir: outDir });
+    await flush();
+
+    expect(pause).not.toHaveBeenCalled();
+    expect(stdin.readableFlowing).toBe(true);
+    expect(stdin.listeners("data")).toEqual([unrelated]);
+    for (const [signal, count] of initialSignals) {
+      expect(process.listenerCount(signal)).toBe(count);
+    }
+    expect(spawn).not.toHaveBeenCalled();
+  });
+
+  it("restores shared stdin after concurrent runners close in creation order", async () => {
+    attachTty();
+    const { logger } = captureLogger();
+    const first = createElectronRunner({ cwd, debounceMs: 1, logger });
+    const second = createElectronRunner({ cwd, debounceMs: 1, logger });
+
+    expect(stdin.listenerCount("data")).toBe(2);
+    await first.close();
+    expect(stdin.readableFlowing).toBe(true);
+    expect(stdin.listenerCount("data")).toBe(1);
+
+    await second.close();
+    expect(stdin.isPaused()).toBe(true);
+    expect(stdin.listenerCount("data")).toBe(0);
+  });
+
+  it("restores shared stdin after concurrent runners close in reverse order", async () => {
+    attachTty();
+    const { logger } = captureLogger();
+    const first = createElectronRunner({ cwd, debounceMs: 1, logger });
+    const second = createElectronRunner({ cwd, debounceMs: 1, logger });
+
+    await second.close();
+    expect(stdin.readableFlowing).toBe(true);
+    expect(stdin.listenerCount("data")).toBe(1);
+
+    await first.close();
+    expect(stdin.isPaused()).toBe(true);
+    expect(stdin.listenerCount("data")).toBe(0);
+  });
+
+  it("captures fresh stdin state after a runner group fully closes", async () => {
+    attachTty();
+    const { logger } = captureLogger();
+    const first = createElectronRunner({ cwd, debounceMs: 1, logger });
+    const second = createElectronRunner({ cwd, debounceMs: 1, logger });
+    await first.close();
+    await second.close();
+    expect(stdin.isPaused()).toBe(true);
+
+    stdin.resume();
+    const pause = vi.spyOn(stdin, "pause");
+    const later = createElectronRunner({ cwd, debounceMs: 1, logger });
+    await later.close();
+
+    expect(pause).not.toHaveBeenCalled();
+    expect(stdin.readableFlowing).toBe(true);
+    expect(stdin.listenerCount("data")).toBe(0);
   });
 });
