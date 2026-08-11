@@ -1,6 +1,7 @@
 import cp from "node:child_process";
+import os from "node:os";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { clearTerminal, isProcessAlive, killTree } from "../src/process.js";
+import { clearTerminal, isProcessAlive, killTree, resolveElectronBinary } from "../src/process.js";
 
 const originalPlatform = process.platform;
 
@@ -90,6 +91,15 @@ describe("killTree", () => {
     });
 
     await expect(killTree(1)).rejects.toThrow("not permitted");
+  });
+});
+
+describe("resolveElectronBinary", () => {
+  it("falls back to a self-relative lookup when the cwd cannot resolve electron", () => {
+    // os.tmpdir() has no node_modules, so the fallback base is the only way to
+    // reach electron. Whether the binary is downloaded is not this test's
+    // business — it only asserts that resolution did not give up.
+    expect(() => resolveElectronBinary(os.tmpdir())).not.toThrow(/Cannot resolve/);
   });
 });
 

@@ -3,6 +3,7 @@ import { EventEmitter } from "node:events";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { PassThrough } from "node:stream";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const { killTree, spawned } = vi.hoisted(() => {
@@ -188,6 +189,78 @@ describe("createElectronRunner", () => {
     await flush();
 
     expect(spawn).toHaveBeenCalledOnce();
+    await runner.close();
+  });
+});
+
+describe("interactive stdin commands", () => {
+  const realStdin = process.stdin;
+  let stdin: PassThrough & { isTTY: boolean };
+
+  /** Swap process.stdin for a TTY-looking stream the test can write commands to. */
+  function attachTty() {
+    stdin = Object.assign(new PassThrough(), { isTTY: true });
+    Object.defineProperty(process, "stdin", { value: stdin, configurable: true });
+  }
+
+  async function send(command: string) {
+    stdin.write(`${command}\n`);
+    await flush();
+  }
+
+  afterEach(() => {
+    Object.defineProperty(process, "stdin", { value: realStdin, configurable: true });
+  });
+
+  it("answers help and status without a running process", async () => {
+    attachTty();
+    const { logger, messages } = captureLogger();
+    const runner = createElectronRunner({ cwd, debounceMs: 1, logger });
+
+    await send("help");
+    await send("status");
+    await send("not-a-command");
+
+    expect(messages).toEqual([
+      "info Commands: rs|restart, start, stop, status, clear|cls, help",
+      "info Electron stopped",
+    ]);
+
+    await runner.close();
+  });
+
+  it("stops and restarts the process on demand", async () => {
+    fs.writeFileSync(path.join(outDir, "main.js"), "// entry", "utf-8");
+    attachTty();
+    const spawn = vi.spyOn(cp, "spawn").mockImplementation((() => new FakeChild()) as never);
+    const { logger, messages } = captureLogger();
+    const runner = createElectronRunner({ cwd, debounceMs: 1, logger });
+
+    runner.scheduleRestart({ dir: outDir });
+    await flush();
+    expect(spawn).toHaveBeenCalledTimes(1);
+
+    await send("stop");
+    expect(killTree).toHaveBeenCalledWith(12_345);
+    expect(listPidFiles(pidDir(cwd))).toHaveLength(0);
+
+    await send("status");
+    expect(messages.at(-1)).toBe("info Electron stopped");
+
+    await send("start");
+    expect(spawn).toHaveBeenCalledTimes(2);
+
+    await send("rs");
+    expect(spawn).toHaveBeenCalledTimes(3);
+
+    await runner.close();
+  });
+
+  it("ignores stdin when it is not a TTY", async () => {
+    const { logger, messages } = captureLogger();
+    const runner = createElectronRunner({ cwd, debounceMs: 1, logger });
+
+    expect(messages).toEqual([]);
     await runner.close();
   });
 });

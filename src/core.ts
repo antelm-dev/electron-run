@@ -61,6 +61,15 @@ export function createElectronRunner(options: ElectronRunOptions = {}): Electron
 
   const enqueue = createTaskQueue();
 
+  /**
+   * Queue a task nobody awaits. Failures (an unresolvable Electron binary, a
+   * kill that was refused) must not surface as an unhandled rejection and take
+   * the watcher down with them.
+   */
+  function run(task: () => Promise<void>) {
+    enqueue(task).catch((error) => logger.error("Electron task failed", error));
+  }
+
   let restartTimer: ReturnType<typeof setTimeout> | undefined;
   let currentProcess: ChildProcess | null = null;
   let currentPidFile: string | null = null;
@@ -126,7 +135,7 @@ export function createElectronRunner(options: ElectronRunOptions = {}): Electron
     const pidFile = pidFilePath(pidsDir, Date.now(), process.pid);
 
     const child = cp.spawn(
-      electronBinary ?? resolveElectronBinary(),
+      electronBinary ?? resolveElectronBinary(cwd),
       [...context.additionalArgs, context.entryFile],
       {
         cwd: context.cwd,
@@ -247,12 +256,12 @@ export function createElectronRunner(options: ElectronRunOptions = {}): Electron
     }
 
     if (command === "stop") {
-      void enqueue(() => stopElectronProcess());
+      run(() => stopElectronProcess());
       return;
     }
 
     if (command === "start") {
-      void enqueue(async () => {
+      run(async () => {
         if (currentProcess?.pid) {
           logger.info(`Electron already active (pid ${currentProcess.pid})`);
           return;
@@ -263,7 +272,7 @@ export function createElectronRunner(options: ElectronRunOptions = {}): Electron
       return;
     }
 
-    void enqueue(() => restartElectron(context, "manual command"));
+    run(() => restartElectron(context, "manual command"));
   }
 
   function registerStdin() {
@@ -310,7 +319,7 @@ export function createElectronRunner(options: ElectronRunOptions = {}): Electron
       clearTimeout(restartTimer);
       restartTimer = setTimeout(() => {
         const context = createLaunchContext(output);
-        void enqueue(() => restartElectron(context, reason));
+        run(() => restartElectron(context, reason));
       }, debounceMs);
     },
     async close() {
