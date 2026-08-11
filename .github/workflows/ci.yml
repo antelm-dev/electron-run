@@ -18,7 +18,7 @@ env:
   ELECTRON_SKIP_BINARY_DOWNLOAD: 1
 
 jobs:
-  lint:
+  quality:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -32,6 +32,9 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm run fmt:check
       - run: pnpm run lint
+      - run: pnpm run typecheck
+      - run: pnpm run test:coverage
+      - run: pnpm audit --audit-level high
       - if: github.event_name == 'pull_request'
         # release-please derives versions and the changelog from these messages,
         # so a non-conventional commit silently costs a release entry.
@@ -41,10 +44,28 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Latest of each supported line. `packed-consumer` runs at the exact
-        # `engines` floor against the published artifact.
-        node: [22, 24]
-    runs-on: ubuntu-latest
+        include:
+          # Exercise the full suite on the newest supported development line.
+          - os: ubuntu-latest
+            node: 24
+            command: test
+            label: full-node-24
+          # Lifecycle behavior is platform-sensitive, so cover every supported
+          # desktop OS without multiplying it by every Node version.
+          - os: ubuntu-latest
+            node: 22
+            command: test:lifecycle
+            label: lifecycle-linux
+          - os: windows-latest
+            node: 22
+            command: test:lifecycle
+            label: lifecycle-windows
+          - os: macos-latest
+            node: 22
+            command: test:lifecycle
+            label: lifecycle-macos
+    name: test (${{ matrix.label }})
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v6.0.9
@@ -54,7 +75,7 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm run typecheck
-      - run: pnpm run test
+      - run: pnpm run ${{ matrix.command }}
 
   packed-consumer:
     # Installs the packed tarball into an empty project so the published
@@ -121,15 +142,15 @@ jobs:
     # One stable check name for branch protection. Matrix job names necessarily
     # change as supported Node lines advance.
     if: always()
-    needs: [lint, test, packed-consumer]
+    needs: [quality, test, packed-consumer]
     runs-on: ubuntu-latest
     steps:
       - name: Verify every required job succeeded
         env:
-          LINT: ${{ needs.lint.result }}
+          QUALITY: ${{ needs.quality.result }}
           TEST: ${{ needs.test.result }}
           PACKED_CONSUMER: ${{ needs.packed-consumer.result }}
         run: |
-          for result in "$LINT" "$TEST" "$PACKED_CONSUMER"; do
+          for result in "$QUALITY" "$TEST" "$PACKED_CONSUMER"; do
             test "$result" = success
           done
