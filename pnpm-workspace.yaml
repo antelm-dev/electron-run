@@ -6,3 +6,10 @@ allowBuilds:
   # it exports is resolved, and the tests mock that away. Skipping its
   # postinstall keeps a 100+ MB download out of every install.
   electron: false
+
+# Security-patched releases within the dependency ranges used by the test and
+# Electron tooling. Keep these explicit until their parents raise their floors.
+overrides:
+  nanoid: 3.3.18
+  postcss: 8.5.26
+  undici: 7.29.0
