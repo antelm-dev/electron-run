@@ -1,6 +1,6 @@
 {
   "name": "rollup-plugin-electron-run",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Rollup plugin and runner that live-reloads Electron on rebuild, with interactive restart controls.",
   "keywords": [
     "electron",
