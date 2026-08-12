@@ -10,6 +10,20 @@ export type { ElectronRunOptions } from "./types.js";
  *
  * Inert outside watch mode: a one-shot `rollup -c` must not spawn an app and
  * hang the build.
+ *
+ * @param options Electron runner options shared across rebuilds.
+ * @returns A Rollup plugin that owns the Electron runner during watch mode.
+ *
+ * @example
+ * ```js
+ * import electronRun from "rollup-plugin-electron-run";
+ *
+ * export default {
+ *   input: "src/main.ts",
+ *   output: { dir: "dist", format: "cjs" },
+ *   plugins: [electronRun({ entry: "main.js" })],
+ * };
+ * ```
  */
 export default function electronRun(options?: ElectronRunOptions): Plugin {
   let runner: ElectronRunner | undefined;

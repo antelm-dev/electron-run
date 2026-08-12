@@ -12,7 +12,7 @@
     "typescript",
     "watch"
   ],
-  "homepage": "https://github.com/antelm-dev/electron-run#readme",
+  "homepage": "https://antelm-dev.github.io/electron-run/",
   "bugs": "https://github.com/antelm-dev/electron-run/issues",
   "license": "MIT",
   "author": "Adel Terki",
@@ -42,6 +42,7 @@
   },
   "scripts": {
     "build": "tsc",
+    "docs": "pnpm --dir tools/docs run build",
     "prepare": "tsc",
     "typecheck": "tsc --noEmit",
     "lint": "oxlint .",

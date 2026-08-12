@@ -24,11 +24,20 @@ import type { BundleOutputLocation, Command, ElectronRunOptions, LaunchContext }
 
 export type { ElectronRunOptions } from "./types.js";
 
-/** A handle over an Electron process that restarts on rebuild and stops cleanly. */
+/** Controls the Electron process managed by {@link createElectronRunner}. */
 export interface ElectronRunner {
-  /** Debounced restart triggered from a bundle write. */
+  /**
+   * Schedule a debounced restart using the latest bundle output location.
+   * Repeated calls within `debounceMs` replace the pending restart.
+   *
+   * @param output Rollup-compatible output location containing the Electron entry file.
+   * @param reason Label included in the restart log. Defaults to `"rebuild"`.
+   */
   scheduleRestart(output: BundleOutputLocation, reason?: string): void;
-  /** Stop the running process and flush the queue. */
+  /**
+   * Cancel any pending restart, detach process and stdin handlers, and stop Electron.
+   * Calling `close` more than once returns the same promise.
+   */
   close(): Promise<void>;
 }
 
@@ -69,6 +78,24 @@ async function waitForPidExit(pid: number, timeoutMs: number): Promise<boolean> 
   return !isProcessAlive(pid);
 }
 
+/**
+ * Create a standalone Electron process runner.
+ *
+ * Call {@link ElectronRunner.scheduleRestart} after a successful build. The
+ * runner resolves the configured entry file from the supplied bundle output,
+ * stops any process it previously launched, and starts Electron again. Call
+ * {@link ElectronRunner.close} when the surrounding watcher shuts down.
+ *
+ * @param options Process, restart, terminal, and logging options.
+ * @returns A runner that can be notified of builds and closed during shutdown.
+ *
+ * @example
+ * ```ts
+ * const runner = createElectronRunner({ entry: "main.js" });
+ * runner.scheduleRestart({ dir: "dist" });
+ * await runner.close();
+ * ```
+ */
 export function createElectronRunner(options: ElectronRunOptions = {}): ElectronRunner {
   const entry = options.entry ?? DEFAULT_ENTRY;
   const debounceMs = options.debounceMs ?? DEFAULT_DEBOUNCE_MS;

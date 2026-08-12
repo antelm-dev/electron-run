@@ -1,15 +1,19 @@
-import type { COMMANDS } from "./constants.js";
 import type { LoggerLike } from "./logger.js";
 
-/** One of the interactive stdin commands. */
-export type Command = typeof COMMANDS extends Set<infer T> ? T : never;
+/** A command accepted from interactive stdin while the runner is active. */
+export type Command = "rs" | "restart" | "start" | "stop" | "status" | "clear" | "cls" | "help";
 
 /** Snapshot persisted to a pid file while an Electron process is running. */
 export interface PidInfo {
+  /** Operating-system process identifier. */
   pid: number;
+  /** ISO timestamp recorded when the process was launched. */
   startedAt: string;
+  /** Absolute path to the Electron application entry file. */
   entry: string;
+  /** Arguments supplied to Electron before the entry file. */
   args: string[];
+  /** Working directory from which Electron was launched. */
   cwd: string;
   /** OS-derived identity used to distinguish a live child from a reused pid. */
   identity: string;
@@ -17,10 +21,15 @@ export interface PidInfo {
 
 /** Fully resolved parameters used to spawn an Electron process. */
 export interface LaunchContext {
+  /** Working directory used for the child process. */
   cwd: string;
+  /** Additional environment variables merged with the parent environment. */
   env: Record<string, string>;
+  /** Absolute path to the bundled Electron entry file. */
   entryFile: string;
+  /** Arguments inserted before the Electron entry file. */
   additionalArgs: string[];
+  /** Whether to clear the terminal immediately before launch. */
   clearScreen: boolean;
 }
 
@@ -29,7 +38,9 @@ export interface LaunchContext {
  * paths are resolved from the runner's configured `cwd`.
  */
 export interface BundleOutputLocation {
+  /** Directory containing the bundle output. Mutually exclusive with {@link file}. */
   dir?: string;
+  /** Path to a single bundle output file. Mutually exclusive with {@link dir}. */
   file?: string;
 }
 

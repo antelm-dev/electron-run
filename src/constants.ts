@@ -1,3 +1,5 @@
+import type { Command } from "./types.js";
+
 /** Prefix for the per-process pid tracking files. */
 export const PID_FILE_PREFIX = "electron-run-";
 
@@ -14,7 +16,7 @@ export const DEFAULT_DEBOUNCE_MS = 150;
 export const KILL_TIMEOUT_MS = 3000;
 
 /** Interactive stdin commands accepted while the runner is attached to a TTY. */
-export const COMMANDS = new Set([
+export const COMMANDS: ReadonlySet<Command> = new Set([
   "rs",
   "restart",
   "start",
@@ -23,4 +25,4 @@ export const COMMANDS = new Set([
   "clear",
   "cls",
   "help",
-] as const);
+]);
