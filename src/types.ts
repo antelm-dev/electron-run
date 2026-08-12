@@ -11,6 +11,8 @@ export interface PidInfo {
   entry: string;
   args: string[];
   cwd: string;
+  /** OS-derived identity used to distinguish a live child from a reused pid. */
+  identity: string;
 }
 
 /** Fully resolved parameters used to spawn an Electron process. */
@@ -22,7 +24,10 @@ export interface LaunchContext {
   clearScreen: boolean;
 }
 
-/** Rollup output descriptor used to locate the bundled entry file. */
+/**
+ * Rollup output descriptor used to locate the bundled entry file. Relative
+ * paths are resolved from the runner's configured `cwd`.
+ */
 export interface BundleOutputLocation {
   dir?: string;
   file?: string;
