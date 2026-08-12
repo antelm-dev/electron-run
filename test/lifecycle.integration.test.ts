@@ -59,7 +59,12 @@ afterEach(async () => {
   }
   children.clear();
   for (const directory of temporaryDirectories.splice(0)) {
-    fs.rmSync(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    try {
+      fs.rmSync(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    } catch {
+      // A leftover child still holding the cwd makes Windows report EBUSY here.
+      // The temp directory is disposable; never let cleanup mask the real failure.
+    }
   }
 });
 
