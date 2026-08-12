@@ -1,3 +1,6 @@
+packages:
+  - tools/docs
+
 # pnpm 10+ reads its settings from here rather than the package.json `pnpm` field.
 allowBuilds:
   # vitest's bundler needs its platform binary.

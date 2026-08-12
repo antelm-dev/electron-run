@@ -130,13 +130,16 @@ Disable this with `stdinControls: false`.
 | `createElectronRunner(options?)` | Create a standalone runner (`scheduleRestart`, `close`). |
 | `createLogger(label, level?)`    | The labelled console logger used by default.             |
 
-Types (`ElectronRunOptions`, `ElectronRunner`, `LoggerLike`, `LaunchContext`, `PidInfo`, `Command`, `BundleOutputLocation`) are exported from the package root.
+Types (`ElectronRunOptions`, `ElectronRunner`, `LoggerLike`, `LogLevel`, `LaunchContext`, `PidInfo`, `Command`, `BundleOutputLocation`) are exported from the package root.
+
+See the [generated API reference](https://antelm-dev.github.io/electron-run/) for complete signatures and member documentation.
 
 ## Development
 
 ```bash
 pnpm install
 pnpm run build       # tsc -> dist
+pnpm run docs        # TypeDoc -> docs
 pnpm run test        # vitest
 pnpm run test:coverage # vitest with enforced coverage floors
 pnpm run lint        # oxlint
