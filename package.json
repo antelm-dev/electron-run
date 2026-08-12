@@ -60,14 +60,14 @@
     "@arethetypeswrong/cli": "0.18.5",
     "@commitlint/cli": "^21.2.1",
     "@commitlint/config-conventional": "^21.2.0",
-    "@types/node": "^22.8.6",
+    "@types/node": "^26.2.0",
     "@vitest/coverage-v8": "4.1.10",
-    "electron": "41.10.3",
-    "oxfmt": "^0.57.0",
+    "electron": "43.3.0",
+    "oxfmt": "^0.62.0",
     "oxlint": "^1.72.0",
     "publint": "0.3.23",
     "rollup": "^4.17.2",
-    "typescript": "^5.8.3",
+    "typescript": "^7.0.2",
     "vitest": "^4.1.10"
   },
   "peerDependencies": {
