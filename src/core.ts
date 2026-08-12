@@ -1,7 +1,13 @@
 import cp, { type ChildProcess } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { COMMANDS, DEFAULT_DEBOUNCE_MS, DEFAULT_ENTRY, KILL_TIMEOUT_MS } from "./constants.js";
+import {
+  COMMANDS,
+  DEFAULT_DEBOUNCE_MS,
+  DEFAULT_ENTRY,
+  IDENTITY_TIMEOUT_MS,
+  KILL_TIMEOUT_MS,
+} from "./constants.js";
 import { createLogger } from "./logger.js";
 import {
   isReclaimable,
@@ -258,7 +264,7 @@ export function createElectronRunner(options: ElectronRunOptions = {}): Electron
 
     try {
       let identity: string | null = null;
-      const identityDeadline = Date.now() + 1_000;
+      const identityDeadline = Date.now() + IDENTITY_TIMEOUT_MS;
       while (
         child.pid &&
         !identity &&
