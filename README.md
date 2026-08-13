@@ -5,8 +5,11 @@
 [![node](https://img.shields.io/node/v/rollup-plugin-electron-run)](https://nodejs.org)
 [![license](https://img.shields.io/npm/l/rollup-plugin-electron-run)](LICENSE)
 
-Live-reload Electron whenever Rollup rebuilds.
+Build and live-reload Electron from a normal Vite or Rollup project.
 
+- Builds TypeScript main and preload targets alongside a Vite renderer
+- Keeps the renderer framework-neutral and preserves target-scoped plugins
+- Builds a sandbox-compatible preload before the main-process bundle
 - Restarts Electron after each bundle write
 - Stops the previous process before relaunching
 - Cleans up the process tree when the watcher exits
@@ -19,10 +22,78 @@ Live-reload Electron whenever Rollup rebuilds.
 npm install --save-dev rollup-plugin-electron-run
 ```
 
-Requires Node.js 18 or newer and Electron. Rollup 4 or newer is required when
-using the Rollup plugin. The package is ESM-only.
+Requires Node.js 18 or newer and Electron. Vite 5–7 or Rollup 4 or newer is
+required only when using its corresponding plugin. The package is ESM-only.
 
 ## Usage
+
+### Vite
+
+Use the Vite plugin when one configuration should serve/build the renderer,
+bundle main and preload code, and manage Electron during development:
+
+```ts
+// vite.config.ts
+import electron from "rollup-plugin-electron-run/vite-plugin";
+import { defineConfig } from "vite";
+
+export default defineConfig({
+  root: "src/renderer",
+  base: "./",
+  plugins: [
+    electron({
+      main: { input: "src/main/index.ts" },
+      preload: { input: "src/preload/index.ts" },
+    }),
+  ],
+  build: { outDir: "../../out/renderer" },
+});
+```
+
+Then use the ordinary Vite commands:
+
+```bash
+vite        # renderer HMR, watched Electron builds, and Electron launch
+vite build  # renderer, preload, and main production outputs
+```
+
+Defaults are `out/main/index.cjs` and `out/preload/index.cjs`. Vite handles
+TypeScript and dependency bundling; Electron and Node built-ins stay external.
+The preload is emitted as one CommonJS file for sandboxed renderers. During
+development, `VITE_DEV_SERVER_URL` contains Vite's resolved renderer URL.
+
+Rollup-compatible plugins remain target-scoped. For example, attach the
+`electron-ipc-module` bridge generator to the main build:
+
+```ts
+import ipcBridge from "electron-ipc-module/rollup-plugin";
+
+electron({
+  main: {
+    input: "src/main/index.ts",
+    plugins: [
+      ipcBridge({
+        ipcDir: "src/main/ipc",
+        outFile: "src/preload/generated/ipc-bridge.ts",
+        tsconfig: "tsconfig.main.json",
+      }),
+    ],
+  },
+  preload: { input: "src/preload/index.ts" },
+});
+```
+
+Each target also accepts `outFile`, `external`, `target`, `sourcemap`, `minify`,
+`define`, and extra `watch` paths. Pass existing process options under `runner`:
+
+```ts
+electron({
+  main: { input: "src/main/index.ts" },
+  runner: { additionalArgs: ["--inspect"], stdinControls: false },
+});
+```
+
+### Rollup
 
 Add the plugin to your Rollup configuration:
 
@@ -50,7 +121,7 @@ npx rollup --config --watch
 Electron restarts after every successful rebuild. The plugin does nothing during
 a regular, non-watch build.
 
-### Interactive commands
+## Interactive commands
 
 Type a command and press <kbd>Enter</kbd> while the watcher is running:
 
@@ -66,6 +137,9 @@ Type a command and press <kbd>Enter</kbd> while the watcher is running:
 Set `stdinControls: false` to disable these commands.
 
 ## Options
+
+These process options are accepted by the Rollup plugin, standalone runner,
+and the Vite plugin's `runner` property.
 
 | Option           | Type                     | Default          | Description                                     |
 | ---------------- | ------------------------ | ---------------- | ----------------------------------------------- |

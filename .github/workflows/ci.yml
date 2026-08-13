@@ -109,11 +109,12 @@ jobs:
         working-directory: ${{ runner.temp }}
         # npm installs peer dependencies by default, so a missing declaration
         # surfaces here as a load failure below rather than as a warning.
-        # electron and rollup are optional-at-runtime peers, so neither is
-        # installed: the entry points must load without them.
+        # Electron and Rollup are optional-at-runtime peers. Vite is installed
+        # only because this probe explicitly loads the Vite subpath.
         run: |
           mkdir consumer && cd consumer
           npm init -y >/dev/null
+          npm install vite@5
           npm install --legacy-peer-deps "$RUNNER_TEMP"/rollup-plugin-electron-run-*.tgz
       - name: The entry points load and the runner is constructible
         working-directory: ${{ runner.temp }}/consumer
@@ -121,11 +122,15 @@ jobs:
           cat > probe.mjs <<'EOF'
           const index = await import("rollup-plugin-electron-run");
           const plugin = await import("rollup-plugin-electron-run/rollup-plugin");
+          const vitePlugin = await import("rollup-plugin-electron-run/vite-plugin");
           if (typeof index.createElectronRunner !== "function") {
             throw new Error("index entry point is missing createElectronRunner");
           }
           if (typeof plugin.default !== "function") {
             throw new Error("rollup-plugin entry point is missing its default export");
+          }
+          if (typeof vitePlugin.default !== "function") {
+            throw new Error("vite-plugin entry point is missing its default export");
           }
           // Constructing must not reach for electron: resolution is deferred to
           // the first launch, which is what makes the peer dependency optional
