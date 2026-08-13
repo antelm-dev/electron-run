@@ -30,7 +30,7 @@ export interface ElectronViteTargetOptions {
   minify?: BuildOptions["minify"];
   /** Compile-time replacements scoped to this target. */
   define?: Record<string, unknown>;
-  /** Extra files or directories that should trigger a rebuild. */
+  /** Extra files or directories that should trigger a development rebuild. */
   watch?: string[];
 }
 
@@ -39,11 +39,11 @@ export interface ElectronVitePluginOptions {
   main: ElectronViteTargetOptions;
   /** Optional sandbox-compatible, single-file CommonJS preload build. */
   preload?: ElectronViteTargetOptions;
-  /** Existing Electron process-runner options. */
+  /** Electron process-runner options. `entry` defaults to the main output basename. */
   runner?: ElectronRunOptions;
   /** Base directory for entries and outputs. Defaults to `process.cwd()`. */
   cwd?: string;
-  /** Environment variable containing the resolved Vite renderer URL. */
+  /** Environment variable containing the resolved renderer URL. Defaults to `VITE_DEV_SERVER_URL`. */
   devServerUrlEnv?: string;
 }
 
@@ -127,6 +127,15 @@ function targetConfig(target: ResolvedTarget, development: boolean): InlineConfi
   };
 }
 
+function watchMain(main: ResolvedTarget): RollupPlugin {
+  return {
+    name: "electron-run:watch-main",
+    buildStart() {
+      for (const file of main.watch ?? []) this.addWatchFile(file);
+    },
+  };
+}
+
 function preloadFirst(preload: ResolvedTarget, development: boolean): RollupPlugin {
   return {
     name: "electron-run:preload-first",
@@ -177,6 +186,7 @@ export default function electronVite(options: ElectronVitePluginOptions): Plugin
     const config = targetConfig(main, development);
     config.plugins = [
       ...(main.plugins ?? []),
+      development && Boolean(main.watch?.length) && watchMain(main),
       preload && preloadFirst(preload, development),
       development &&
         electronRun({

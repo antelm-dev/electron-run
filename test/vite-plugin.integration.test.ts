@@ -60,17 +60,20 @@ describe("electronVite consumer build", () => {
     expect(await readFile(preloadOutput, "utf8")).toContain('require("electron")');
   });
 
-  it("rebuilds and relaunches the main process from a Vite dev server", async () => {
+  it("rebuilds and relaunches when an extra main watch path changes", async () => {
     fixture = await mkdtemp(path.join(process.cwd(), ".electron-run-vite-watch-"));
     const renderer = path.join(fixture, "renderer");
     const mainSource = path.join(fixture, "main.ts");
+    const watchedState = path.join(fixture, "main-state.txt");
     const marker = path.join(fixture, "launch.txt");
     await mkdir(renderer, { recursive: true });
     await writeFile(path.join(renderer, "index.html"), "<!doctype html><h1>ready</h1>");
 
-    const source = (value: string) =>
-      `import { writeFileSync } from "node:fs"; writeFileSync(${JSON.stringify(marker)}, ${JSON.stringify(value)});`;
-    await writeFile(mainSource, source("first"));
+    await writeFile(watchedState, "first");
+    await writeFile(
+      mainSource,
+      `import { readFileSync, writeFileSync } from "node:fs"; writeFileSync(${JSON.stringify(marker)}, readFileSync(${JSON.stringify(watchedState)}, "utf8"));`,
+    );
 
     const server = await createServer({
       configFile: false,
@@ -80,7 +83,7 @@ describe("electronVite consumer build", () => {
       plugins: [
         electronVite({
           cwd: fixture,
-          main: { input: "main.ts" },
+          main: { input: "main.ts", watch: ["main-state.txt"] },
           runner: {
             electronPath: process.execPath,
             stdinControls: false,
@@ -97,7 +100,7 @@ describe("electronVite consumer build", () => {
       });
 
       await new Promise((resolve) => setTimeout(resolve, 250));
-      await writeFile(mainSource, source("second-build"));
+      await writeFile(watchedState, "second-build");
       await vi.waitFor(async () => expect(await readFile(marker, "utf8")).toBe("second-build"), {
         timeout: 10_000,
       });
