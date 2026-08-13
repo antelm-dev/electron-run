@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.3.1](https://github.com/antelm-dev/electron-run/compare/v0.3.0...v0.3.1) (2026-08-13)
+
+
+### Bug Fixes
+
+* harden releases and honor Vite main watch paths ([1a97bd0](https://github.com/antelm-dev/electron-run/commit/1a97bd036e2436a269ac0fd20b4d04b8f7d8fe87))
+* honor extra Vite main watch paths ([b8b379a](https://github.com/antelm-dev/electron-run/commit/b8b379a6764dcfe16246ae30c67071e6202f08d5))
+* make npm publishing retryable ([45981ac](https://github.com/antelm-dev/electron-run/commit/45981ac9adc4b15a77a184b129cbccc134035f05))
+
 ## [0.3.0](https://github.com/antelm-dev/electron-run/compare/v0.2.0...v0.3.0) (2026-08-13)
 
 
