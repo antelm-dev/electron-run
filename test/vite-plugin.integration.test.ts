@@ -1,6 +1,5 @@
 import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import path from "node:path";
 import { build, createServer } from "vite";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -15,7 +14,7 @@ describe("electronVite consumer build", () => {
   });
 
   it("builds renderer, main, and a single-file CommonJS preload", async () => {
-    fixture = await mkdtemp(path.join(tmpdir(), "electron-run-vite-"));
+    fixture = await mkdtemp(path.join(process.cwd(), ".electron-run-vite-build-"));
     const renderer = path.join(fixture, "renderer");
     await mkdir(renderer, { recursive: true });
     await writeFile(
