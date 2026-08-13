@@ -4,6 +4,12 @@ on:
   push:
     branches:
       - master
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag to publish or retry (for example, v0.3.1)
+        required: true
+        type: string
 
 concurrency:
   group: release
@@ -14,6 +20,7 @@ permissions:
 
 jobs:
   release-please:
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -33,7 +40,9 @@ jobs:
 
   publish:
     needs: release-please
-    if: needs.release-please.outputs.released == 'true'
+    if: >-
+      always() &&
+      (needs.release-please.outputs.released == 'true' || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -42,7 +51,7 @@ jobs:
     env:
       # electron is never imported by the tests; only its binary path is resolved
       ELECTRON_SKIP_BINARY_DOWNLOAD: 1
-      RELEASE_TAG: ${{ needs.release-please.outputs.tag }}
+      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || needs.release-please.outputs.tag }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -53,11 +62,32 @@ jobs:
           # npm 11.5.1+ is what speaks trusted publishing; Node 24 ships it.
           node-version: 24
           registry-url: https://registry.npmjs.org
-          cache: pnpm
+          # Release installs should not trust a dependency cache populated by a
+          # less-privileged workflow.
+          package-manager-cache: false
+      - name: Validate tag against package version
+        shell: bash
+        run: |
+          package_version="$(node -p "require('./package.json').version")"
+          if [[ "$RELEASE_TAG" != "v$package_version" ]]; then
+            echo "::error title=Release tag mismatch::$RELEASE_TAG does not match package version $package_version"
+            exit 1
+          fi
       - run: pnpm install --frozen-lockfile
       # `prepack` already runs `check && build` on publish
       - name: Publish with the appropriate npm dist-tag
+        # The existence check makes a failed workflow safe to retry when npm
+        # accepted the immutable package version before a later step failed.
+        # npm trusted publishing must authorize this repository, release.yml,
+        # the `npm` environment, and the `npm publish` action.
         run: |
+          package_name="$(node -p "require('./package.json').name")"
+          package_version="$(node -p "require('./package.json').version")"
+          if npm view "$package_name@$package_version" version >/dev/null 2>&1; then
+            echo "::notice title=Already published::$package_name@$package_version is already on npm; skipping the immutable publish"
+            exit 0
+          fi
+
           if [[ "$RELEASE_TAG" == *-* ]]; then
             npm publish --access public --tag next
           else

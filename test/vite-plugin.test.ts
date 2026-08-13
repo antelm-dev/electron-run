@@ -72,9 +72,10 @@ describe("electronVite", () => {
   });
 
   it("starts a watched build with the resolved renderer URL and closes it with Vite", async () => {
+    const cwd = path.resolve("fixture");
     const plugin = electronVite({
-      cwd: path.resolve("fixture"),
-      main: { input: "src/main.ts" },
+      cwd,
+      main: { input: "src/main.ts", watch: ["generated/main-state.json"] },
       runner: { stdinControls: false },
     });
     hook(plugin, "configResolved")({ command: "serve" });
@@ -100,7 +101,15 @@ describe("electronVite", () => {
         env: { VITE_DEV_SERVER_URL: "http://localhost:4173/" },
       }),
     );
-    expect(mocks.build.mock.calls[0]![0].build?.watch).toEqual({});
+    const watchedConfig = mocks.build.mock.calls[0]![0];
+    expect(watchedConfig.build?.watch).toEqual({});
+
+    const addWatchFile = vi.fn();
+    const watchPlugin = (watchedConfig.plugins as Plugin[]).find(
+      (candidate) => candidate?.name === "electron-run:watch-main",
+    )!;
+    hook(watchPlugin, "buildStart").call({ addWatchFile });
+    expect(addWatchFile).toHaveBeenCalledWith(path.join(cwd, "generated/main-state.json"));
 
     httpServer.emit("close");
     await vi.waitFor(() => expect(mocks.watcher.close).toHaveBeenCalledOnce());
