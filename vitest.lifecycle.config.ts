@@ -8,6 +8,7 @@ export default defineConfig({
       "test/process.test.ts",
       "test/pid-file.test.ts",
       "test/lifecycle.integration.test.ts",
+      "test/vite-plugin.integration.test.ts",
     ],
     clearMocks: true,
     restoreMocks: true,

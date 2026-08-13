@@ -1,7 +1,7 @@
 {
   "name": "rollup-plugin-electron-run",
   "version": "0.1.1",
-  "description": "Rollup plugin and runner that live-reloads Electron on rebuild, with interactive restart controls.",
+  "description": "Vite and Rollup plugins that build and live-reload Electron with reliable process shutdown.",
   "keywords": [
     "electron",
     "hmr",
@@ -38,6 +38,10 @@
     "./rollup-plugin": {
       "types": "./dist/rollup-plugin.d.ts",
       "import": "./dist/rollup-plugin.js"
+    },
+    "./vite-plugin": {
+      "types": "./dist/vite-plugin.d.ts",
+      "import": "./dist/vite-plugin.js"
     }
   },
   "scripts": {
@@ -69,14 +73,19 @@
     "publint": "0.3.23",
     "rollup": "^4.17.2",
     "typescript": "^7.0.2",
+    "vite": "^7.3.6",
     "vitest": "^4.1.10"
   },
   "peerDependencies": {
     "electron": ">=20.0.0",
-    "rollup": "^4.0.0"
+    "rollup": "^4.0.0",
+    "vite": "^5.0.0 || ^6.0.0 || ^7.0.0"
   },
   "peerDependenciesMeta": {
     "rollup": {
+      "optional": true
+    },
+    "vite": {
       "optional": true
     }
   },
