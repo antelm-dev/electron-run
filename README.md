@@ -1,9 +1,9 @@
-# rollup-plugin-electron-run
+# vite-plugin-electron-run
 
 [![CI](https://github.com/antelm-dev/electron-run/actions/workflows/ci.yml/badge.svg)](https://github.com/antelm-dev/electron-run/actions/workflows/ci.yml)
-[![npm](https://img.shields.io/npm/v/rollup-plugin-electron-run)](https://www.npmjs.com/package/rollup-plugin-electron-run)
-[![node](https://img.shields.io/node/v/rollup-plugin-electron-run)](https://nodejs.org)
-[![license](https://img.shields.io/npm/l/rollup-plugin-electron-run)](LICENSE)
+[![npm](https://img.shields.io/npm/v/vite-plugin-electron-run)](https://www.npmjs.com/package/vite-plugin-electron-run)
+[![node](https://img.shields.io/node/v/vite-plugin-electron-run)](https://nodejs.org)
+[![license](https://img.shields.io/npm/l/vite-plugin-electron-run)](LICENSE)
 
 Build and live-reload Electron from a normal Vite or Rollup project.
 
@@ -19,8 +19,12 @@ Build and live-reload Electron from a normal Vite or Rollup project.
 ## Install
 
 ```bash
-npm install --save-dev rollup-plugin-electron-run
+npm install --save-dev vite-plugin-electron-run
 ```
+
+This package was previously published as `rollup-plugin-electron-run`. The
+package root now exports the Vite plugin; use the `/rollup-plugin` entry point
+for a Rollup configuration.
 
 Requires Node.js 18 or newer and Electron. Vite 5–7 or Rollup 4 or newer is
 required only when using its corresponding plugin. The package is ESM-only.
@@ -34,7 +38,7 @@ bundle main and preload code, and manage Electron during development:
 
 ```ts
 // vite.config.ts
-import electron from "rollup-plugin-electron-run/vite-plugin";
+import electron from "vite-plugin-electron-run";
 import { defineConfig } from "vite";
 
 export default defineConfig({
@@ -99,7 +103,7 @@ Add the plugin to your Rollup configuration:
 
 ```js
 // rollup.config.mjs
-import electronRun from "rollup-plugin-electron-run";
+import electronRun from "vite-plugin-electron-run/rollup-plugin";
 
 export default {
   input: "src/main.ts",
@@ -158,7 +162,7 @@ and the Vite plugin's `runner` property.
 Use the runner directly with another bundler or a custom watcher:
 
 ```ts
-import { createElectronRunner } from "rollup-plugin-electron-run";
+import { createElectronRunner } from "vite-plugin-electron-run/runner";
 
 const runner = createElectronRunner({ entry: "main.js" });
 

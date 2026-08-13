@@ -75,6 +75,6 @@ jobs:
         # whoever cut the release.
         if: ${{ !contains(needs.release-please.outputs.tag, '-') }}
         run: |
-          if npm dist-tag ls rollup-plugin-electron-run | grep -q '^next:'; then
-            echo "::warning title=Stale next dist-tag::A stable release just shipped and \`next\` still points at a prerelease. Run: npm dist-tag rm rollup-plugin-electron-run next"
+          if npm dist-tag ls vite-plugin-electron-run | grep -q '^next:'; then
+            echo "::warning title=Stale next dist-tag::A stable release just shipped and \`next\` still points at a prerelease. Run: npm dist-tag rm vite-plugin-electron-run next"
           fi
