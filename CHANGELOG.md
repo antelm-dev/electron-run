@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.3.2](https://github.com/antelm-dev/electron-run/compare/v0.3.1...v0.3.2) (2026-08-13)
+
+
+### Bug Fixes
+
+* propagate Vite environment settings ([4b39422](https://github.com/antelm-dev/electron-run/commit/4b3942227793780383ea8d0d8133e441f17f2a64))
+* propagate Vite environment settings ([0920212](https://github.com/antelm-dev/electron-run/commit/0920212290bdc897dc633459be232db20f365ce0))
+
 ## [0.3.1](https://github.com/antelm-dev/electron-run/compare/v0.3.0...v0.3.1) (2026-08-13)
 
 

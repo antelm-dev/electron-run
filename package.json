@@ -1,6 +1,6 @@
 {
   "name": "vite-plugin-electron-run",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "Vite and Rollup plugins that build and live-reload Electron with reliable process shutdown.",
   "keywords": [
     "electron",
