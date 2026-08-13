@@ -16,7 +16,7 @@ export type { ElectronRunOptions } from "./types.js";
  *
  * @example
  * ```js
- * import electronRun from "rollup-plugin-electron-run";
+ * import electronRun from "vite-plugin-electron-run/rollup-plugin";
  *
  * export default {
  *   input: "src/main.ts",

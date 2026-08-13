@@ -100,8 +100,8 @@ jobs:
         run: npm pack --ignore-scripts --pack-destination "$RUNNER_TEMP"
       - name: Validate package metadata and type resolution
         run: |
-          pnpm exec publint "$RUNNER_TEMP"/rollup-plugin-electron-run-*.tgz --strict
-          pnpm exec attw "$RUNNER_TEMP"/rollup-plugin-electron-run-*.tgz --profile esm-only
+          pnpm exec publint "$RUNNER_TEMP"/vite-plugin-electron-run-*.tgz --strict
+          pnpm exec attw "$RUNNER_TEMP"/vite-plugin-electron-run-*.tgz --profile esm-only
       - uses: actions/setup-node@v7
         with:
           node-version: 18
@@ -115,16 +115,20 @@ jobs:
           mkdir consumer && cd consumer
           npm init -y >/dev/null
           npm install vite@5
-          npm install --legacy-peer-deps "$RUNNER_TEMP"/rollup-plugin-electron-run-*.tgz
+          npm install --legacy-peer-deps "$RUNNER_TEMP"/vite-plugin-electron-run-*.tgz
       - name: The entry points load and the runner is constructible
         working-directory: ${{ runner.temp }}/consumer
         run: |
           cat > probe.mjs <<'EOF'
-          const index = await import("rollup-plugin-electron-run");
-          const plugin = await import("rollup-plugin-electron-run/rollup-plugin");
-          const vitePlugin = await import("rollup-plugin-electron-run/vite-plugin");
-          if (typeof index.createElectronRunner !== "function") {
-            throw new Error("index entry point is missing createElectronRunner");
+          const index = await import("vite-plugin-electron-run");
+          const plugin = await import("vite-plugin-electron-run/rollup-plugin");
+          const runnerModule = await import("vite-plugin-electron-run/runner");
+          const vitePlugin = await import("vite-plugin-electron-run/vite-plugin");
+          if (typeof index.default !== "function") {
+            throw new Error("index entry point is missing the Vite plugin default export");
+          }
+          if (typeof runnerModule.createElectronRunner !== "function") {
+            throw new Error("runner entry point is missing createElectronRunner");
           }
           if (typeof plugin.default !== "function") {
             throw new Error("rollup-plugin entry point is missing its default export");
@@ -135,7 +139,7 @@ jobs:
           // Constructing must not reach for electron: resolution is deferred to
           // the first launch, which is what makes the peer dependency optional
           // for anyone who only imports the plugin.
-          const runner = index.createElectronRunner({ cwd: process.cwd() });
+          const runner = runnerModule.createElectronRunner({ cwd: process.cwd() });
           if (typeof runner.scheduleRestart !== "function" || typeof runner.close !== "function") {
             throw new Error("createElectronRunner did not return a runner");
           }
