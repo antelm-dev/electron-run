@@ -94,6 +94,15 @@ void app.whenReady().then(createWindow);
 code-signing, and application distribution remain the responsibility of an
 Electron packager such as Electron Forge or electron-builder.
 
+Main and preload builds inherit the resolved renderer `mode` and `envDir`, so
+the same `.env`, `.env.local`, and mode-specific files supply their
+`VITE_*` values. The plugin defines `import.meta.env.DEV` as `true` and
+`import.meta.env.PROD` as `false` for watched `vite serve` targets, with the
+values reversed for `vite build`. This avoids inheriting an ambiguous
+`NODE_ENV` from tools that call Vite's JavaScript API. Use
+`process.env.VITE_DEV_SERVER_URL` for the live renderer URL. Target-level
+`define` values are applied last and can explicitly override these defaults.
+
 Rollup-compatible plugins remain target-scoped. For example, attach the
 `electron-ipc-module` bridge generator to the main build:
 

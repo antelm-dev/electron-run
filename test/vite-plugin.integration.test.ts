@@ -16,7 +16,10 @@ describe("electronVite consumer build", () => {
   it("builds renderer, main, and a single-file CommonJS preload", async () => {
     fixture = await mkdtemp(path.join(process.cwd(), ".electron-run-vite-build-"));
     const renderer = path.join(fixture, "renderer");
+    const envDir = path.join(fixture, "config/env");
     await mkdir(renderer, { recursive: true });
+    await mkdir(envDir, { recursive: true });
+    await writeFile(path.join(envDir, ".env.staging"), "VITE_DESKTOP_VALUE=from-staging-env\n");
     await writeFile(
       path.join(renderer, "index.html"),
       '<!doctype html><div id="app"></div><script type="module" src="/main.ts"></script>',
@@ -27,16 +30,18 @@ describe("electronVite consumer build", () => {
     );
     await writeFile(
       path.join(fixture, "main.ts"),
-      'import { app } from "electron"; const version: string = app.getVersion(); console.log(version);',
+      'import { app } from "electron"; const version: string = app.getVersion(); console.log({ version, mode: import.meta.env.MODE, value: import.meta.env.VITE_DESKTOP_VALUE, dev: import.meta.env.DEV, prod: import.meta.env.PROD });',
     );
     await writeFile(
       path.join(fixture, "preload.ts"),
-      'import { contextBridge } from "electron"; contextBridge.exposeInMainWorld("api", { ready: true });',
+      'import { contextBridge } from "electron"; contextBridge.exposeInMainWorld("api", { mode: import.meta.env.MODE, value: import.meta.env.VITE_DESKTOP_VALUE, dev: import.meta.env.DEV, prod: import.meta.env.PROD });',
     );
 
     await build({
       configFile: false,
       root: renderer,
+      mode: "staging",
+      envDir,
       logLevel: "silent",
       plugins: [
         electronVite({
@@ -56,8 +61,16 @@ describe("electronVite consumer build", () => {
     expect(existsSync(path.join(fixture, "out/renderer/index.html"))).toBe(true);
     expect(existsSync(mainOutput)).toBe(true);
     expect(existsSync(preloadOutput)).toBe(true);
-    expect(await readFile(mainOutput, "utf8")).toContain('require("electron")');
-    expect(await readFile(preloadOutput, "utf8")).toContain('require("electron")');
+    const mainBundle = await readFile(mainOutput, "utf8");
+    const preloadBundle = await readFile(preloadOutput, "utf8");
+    expect(mainBundle).toContain('require("electron")');
+    expect(preloadBundle).toContain('require("electron")');
+    for (const bundle of [mainBundle, preloadBundle]) {
+      expect(bundle).toContain("staging");
+      expect(bundle).toContain("from-staging-env");
+      expect(bundle).toMatch(/dev:\s*false/);
+      expect(bundle).toMatch(/prod:\s*true/);
+    }
   });
 
   it("rebuilds and relaunches when an extra main watch path changes", async () => {
