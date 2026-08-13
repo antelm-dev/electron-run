@@ -43,11 +43,17 @@ describe("electronVite", () => {
       preload: { input: "src/preload.ts", plugins: [{ name: "preload-user-plugin" }] },
     });
 
-    hook(plugin, "configResolved")({ command: "build" });
+    const envDir = path.join(cwd, "config/env");
+    hook(plugin, "configResolved")({ command: "build", mode: "staging", envDir });
     await hook(plugin, "closeBundle").call({ meta: { watchMode: false } });
 
     expect(mocks.build).toHaveBeenCalledOnce();
     const mainConfig = mocks.build.mock.calls[0]![0];
+    expect(mainConfig).toMatchObject({ mode: "staging", envDir });
+    expect(mainConfig.define).toMatchObject({
+      "import.meta.env.DEV": "false",
+      "import.meta.env.PROD": "true",
+    });
     expect(mainConfig.build?.ssr).toBe(path.join(cwd, "src/main.ts"));
     expect(mainConfig.build?.rollupOptions?.output).toMatchObject({
       entryFileNames: "index.cjs",
@@ -62,6 +68,11 @@ describe("electronVite", () => {
 
     expect(mocks.build).toHaveBeenCalledTimes(2);
     const preloadConfig = mocks.build.mock.calls[1]![0];
+    expect(preloadConfig).toMatchObject({ mode: "staging", envDir });
+    expect(preloadConfig.define).toMatchObject({
+      "import.meta.env.DEV": "false",
+      "import.meta.env.PROD": "true",
+    });
     expect(preloadConfig.build?.ssr).toBe(path.join(cwd, "src/preload.ts"));
     expect(preloadConfig.build?.rollupOptions?.output).toMatchObject({
       entryFileNames: "index.cjs",
@@ -78,7 +89,8 @@ describe("electronVite", () => {
       main: { input: "src/main.ts", watch: ["generated/main-state.json"] },
       runner: { stdinControls: false },
     });
-    hook(plugin, "configResolved")({ command: "serve" });
+    const envDir = path.join(cwd, "config/env");
+    hook(plugin, "configResolved")({ command: "serve", mode: "development", envDir });
 
     const httpServer = Object.assign(new EventEmitter(), { listening: false });
     const server = {
@@ -102,6 +114,11 @@ describe("electronVite", () => {
       }),
     );
     const watchedConfig = mocks.build.mock.calls[0]![0];
+    expect(watchedConfig).toMatchObject({ mode: "development", envDir });
+    expect(watchedConfig.define).toMatchObject({
+      "import.meta.env.DEV": "true",
+      "import.meta.env.PROD": "false",
+    });
     expect(watchedConfig.build?.watch).toEqual({});
 
     const addWatchFile = vi.fn();
@@ -113,5 +130,25 @@ describe("electronVite", () => {
 
     httpServer.emit("close");
     await vi.waitFor(() => expect(mocks.watcher.close).toHaveBeenCalledOnce());
+  });
+
+  it("allows target define values to override the environment defaults", async () => {
+    const plugin = electronVite({
+      main: {
+        input: "src/main.ts",
+        define: { "import.meta.env.DEV": "custom-development-flag" },
+      },
+    });
+
+    hook(plugin, "configResolved")({ command: "build", mode: "production", envDir: false });
+    await hook(plugin, "closeBundle").call({ meta: { watchMode: false } });
+
+    expect(mocks.build.mock.calls[0]![0]).toMatchObject({
+      envDir: false,
+      define: {
+        "import.meta.env.DEV": "custom-development-flag",
+        "import.meta.env.PROD": "true",
+      },
+    });
   });
 });

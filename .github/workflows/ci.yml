@@ -147,11 +147,77 @@ jobs:
           EOF
           node probe.mjs
 
+  vite-compat:
+    name: vite compatibility (${{ matrix.vite }})
+    strategy:
+      fail-fast: false
+      matrix:
+        vite: [5, 6, 7]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6.0.10
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run build
+      - name: Pack the publishable artifact
+        run: npm pack --ignore-scripts --pack-destination "$RUNNER_TEMP"
+      - name: Install with Vite ${{ matrix.vite }}
+        working-directory: ${{ runner.temp }}
+        run: |
+          mkdir consumer && cd consumer
+          npm init -y >/dev/null
+          npm install "vite@${{ matrix.vite }}"
+          npm install --legacy-peer-deps "$RUNNER_TEMP"/vite-plugin-electron-run-*.tgz
+      - name: Build a real renderer, main process, and preload
+        working-directory: ${{ runner.temp }}/consumer
+        run: |
+          mkdir -p renderer env
+          printf '<!doctype html><h1>ready</h1>' > renderer/index.html
+          printf 'VITE_COMPAT_VALUE=vite-${{ matrix.vite }}\n' > env/.env.compat
+          printf 'console.log(import.meta.env.MODE, import.meta.env.VITE_COMPAT_VALUE);\n' > main.js
+          printf 'globalThis.compat = import.meta.env.VITE_COMPAT_VALUE;\n' > preload.js
+          cat > probe.mjs <<'EOF'
+          import fs from "node:fs";
+          import path from "node:path";
+          import { build } from "vite";
+          import electron from "vite-plugin-electron-run";
+
+          await build({
+            configFile: false,
+            root: "renderer",
+            mode: "compat",
+            envDir: path.resolve("env"),
+            logLevel: "silent",
+            plugins: [
+              electron({
+                main: { input: "main.js" },
+                preload: { input: "preload.js" },
+              }),
+            ],
+            build: { outDir: path.resolve("out/renderer") },
+          });
+
+          for (const file of ["out/renderer/index.html", "out/main/index.cjs", "out/preload/index.cjs"]) {
+            if (!fs.existsSync(file)) throw new Error(`missing ${file}`);
+          }
+          for (const file of ["out/main/index.cjs", "out/preload/index.cjs"]) {
+            const bundle = fs.readFileSync(file, "utf8");
+            if (!bundle.includes("vite-${{ matrix.vite }}")) {
+              throw new Error(`${file} did not inherit mode/envDir under Vite ${{ matrix.vite }}`);
+            }
+          }
+          EOF
+          node probe.mjs
+
   required:
     # One stable check name for branch protection. Matrix job names necessarily
     # change as supported Node lines advance.
     if: always()
-    needs: [quality, test, packed-consumer]
+    needs: [quality, test, packed-consumer, vite-compat]
     runs-on: ubuntu-latest
     steps:
       - name: Verify every required job succeeded
@@ -159,7 +225,8 @@ jobs:
           QUALITY: ${{ needs.quality.result }}
           TEST: ${{ needs.test.result }}
           PACKED_CONSUMER: ${{ needs.packed-consumer.result }}
+          VITE_COMPAT: ${{ needs.vite-compat.result }}
         run: |
-          for result in "$QUALITY" "$TEST" "$PACKED_CONSUMER"; do
+          for result in "$QUALITY" "$TEST" "$PACKED_CONSUMER" "$VITE_COMPAT"; do
             test "$result" = success
           done
