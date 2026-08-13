@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.2.0](https://github.com/antelm-dev/electron-run/compare/v0.1.1...v0.2.0) (2026-08-13)
+
+
+### Features
+
+* add Vite plugin ([a2e0ff5](https://github.com/antelm-dev/electron-run/commit/a2e0ff5336710a2a8e38a5af721f09e020c03995))
+* add Vite plugin ([05b0948](https://github.com/antelm-dev/electron-run/commit/05b0948dad4ffae13830a1c5bb0ba98cc938f901))
+
 ## [0.1.1](https://github.com/antelm-dev/electron-run/compare/v0.1.0...v0.1.1) (2026-08-12)
 
 
