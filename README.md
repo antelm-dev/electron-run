@@ -255,6 +255,25 @@ pnpm lint
 pnpm fmt:check
 ```
 
+### Prereleases
+
+Prerelease tags publish automatically to npm under the `next` dist-tag without
+moving `latest`. The tag must point at a commit whose `package.json` version is
+the same prerelease version:
+
+```bash
+pnpm version 1.0.0-alpha.1 --no-git-tag-version
+git add package.json pnpm-lock.yaml
+git commit -m "chore: prepare 1.0.0-alpha.1"
+git tag v1.0.0-alpha.1
+git push origin HEAD v1.0.0-alpha.1
+```
+
+The release workflow runs the complete package checks before publishing with
+npm trusted publishing and provenance. It can also be run manually with an
+existing tag to retry an interrupted stable or prerelease publication. Stable
+versions remain managed by the release-please PR flow.
+
 ## License
 
 MIT © [Adel Terki](https://github.com/antelm-dev/electron-run/blob/master/LICENSE)
