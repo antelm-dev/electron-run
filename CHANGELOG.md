@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.3.0](https://github.com/antelm-dev/electron-run/compare/v0.2.0...v0.3.0) (2026-08-13)
+
+
+### ⚠ BREAKING CHANGES
+
+* rename package to vite-plugin-electron-run
+
+### Features
+
+* rename package to vite-plugin-electron-run ([19a5226](https://github.com/antelm-dev/electron-run/commit/19a522600aca9ec3ea219e6db82d5da6184a7bee))
+
 ## [0.2.0](https://github.com/antelm-dev/electron-run/compare/v0.1.1...v0.2.0) (2026-08-13)
 
 
