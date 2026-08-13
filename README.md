@@ -67,16 +67,16 @@ Set `stdinControls: false` to disable these commands.
 
 ## Options
 
-| Option           | Type                     | Default          | Description                                       |
-| ---------------- | ------------------------ | ---------------- | ------------------------------------------------- |
-| `entry`          | `string`                 | `"main.js"`      | Entry file relative to the bundle output          |
-| `electronPath`   | `string`                 | resolved locally | Path to the Electron binary                       |
-| `debounceMs`     | `number`                 | `150`            | Delay before restarting after a rebuild           |
-| `additionalArgs` | `string[]`               | `[]`             | Arguments passed to Electron before the entry     |
-| `cwd`            | `string`                 | `process.cwd()`  | Working directory for Electron                    |
+| Option           | Type                     | Default          | Description                                     |
+| ---------------- | ------------------------ | ---------------- | ----------------------------------------------- |
+| `entry`          | `string`                 | `"main.js"`      | Entry file relative to the bundle output        |
+| `electronPath`   | `string`                 | resolved locally | Path to the Electron binary                     |
+| `debounceMs`     | `number`                 | `150`            | Delay before restarting after a rebuild         |
+| `additionalArgs` | `string[]`               | `[]`             | Arguments passed to Electron before the entry   |
+| `cwd`            | `string`                 | `process.cwd()`  | Working directory for Electron                  |
 | `env`            | `Record<string, string>` | `{}`             | Environment variables merged with `process.env` |
-| `stdinControls`  | `boolean`                | `true`           | Enable interactive terminal commands              |
-| `clearScreen`    | `boolean`                | `false`          | Clear the terminal before launching                |
+| `stdinControls`  | `boolean`                | `true`           | Enable interactive terminal commands            |
+| `clearScreen`    | `boolean`                | `false`          | Clear the terminal before launching             |
 | `logger`         | `LoggerLike`             | console logger   | Custom `error`/`warn`/`info`/`debug` logger     |
 
 ## Standalone runner
