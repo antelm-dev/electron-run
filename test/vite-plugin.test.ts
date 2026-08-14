@@ -188,6 +188,18 @@ describe("electronVite", () => {
     );
   });
 
+  it("resolves a relative Electron path from the effective Vite runner cwd", () => {
+    fs.writeFileSync(path.join(cwd, "electron.exe"), "", "utf8");
+
+    expect(() =>
+      electronVite({
+        cwd,
+        main: { input: "src/main.ts" },
+        runner: { electronPath: "electron.exe" },
+      }),
+    ).not.toThrow();
+  });
+
   it("allows target define values to override the environment defaults", async () => {
     const plugin = electronVite({
       cwd,
