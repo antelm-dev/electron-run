@@ -39,7 +39,10 @@ export interface ElectronVitePluginOptions {
   main: ElectronViteTargetOptions;
   /** Optional sandbox-compatible, single-file CommonJS preload build. */
   preload?: ElectronViteTargetOptions;
-  /** Electron process-runner options. `entry` defaults to the main output basename. */
+  /**
+   * Electron process-runner options. `entry` defaults to the main output basename
+   * and `manageProcessSignals` defaults to `false` so Vite owns host shutdown.
+   */
   runner?: ElectronRunOptions;
   /** Base directory for entries and outputs. Defaults to `process.cwd()`. */
   cwd?: string;
@@ -213,6 +216,7 @@ export default function electronVite(options: ElectronVitePluginOptions): Plugin
           ...options.runner,
           cwd: options.runner?.cwd ?? cwd,
           entry: options.runner?.entry ?? path.basename(main.outFile),
+          manageProcessSignals: options.runner?.manageProcessSignals ?? false,
           env: {
             ...options.runner?.env,
             [urlEnvironment]: url ?? "",

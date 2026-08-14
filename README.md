@@ -182,13 +182,13 @@ Commands are available only when the watcher owns an interactive TTY. Set
 
 ### Vite plugin
 
-| Option            | Type                        | Default                 | Description                                     |
-| ----------------- | --------------------------- | ----------------------- | ----------------------------------------------- |
-| `main`            | `ElectronViteTargetOptions` | required                | Main-process build                              |
-| `preload`         | `ElectronViteTargetOptions` | none                    | Optional single-file CommonJS preload build     |
-| `runner`          | `ElectronRunOptions`        | `{}`                    | Electron process options during development     |
-| `cwd`             | `string`                    | `process.cwd()`         | Base directory for target inputs and outputs    |
-| `devServerUrlEnv` | `string`                    | `"VITE_DEV_SERVER_URL"` | Environment variable receiving the renderer URL |
+| Option            | Type                        | Default                 | Description                                      |
+| ----------------- | --------------------------- | ----------------------- | ------------------------------------------------ |
+| `main`            | `ElectronViteTargetOptions` | required                | Main-process build                               |
+| `preload`         | `ElectronViteTargetOptions` | none                    | Optional single-file CommonJS preload build      |
+| `runner`          | `ElectronRunOptions`        | `{}`                    | Electron process options; Vite owns host signals |
+| `cwd`             | `string`                    | `process.cwd()`         | Base directory for target inputs and outputs     |
+| `devServerUrlEnv` | `string`                    | `"VITE_DEV_SERVER_URL"` | Environment variable receiving the renderer URL  |
 
 Each main or preload target accepts these options:
 
@@ -209,17 +209,24 @@ Each main or preload target accepts these options:
 These options are accepted by the Rollup plugin, standalone runner, and the
 Vite plugin's `runner` property.
 
-| Option           | Type                     | Default          | Description                                                         |
-| ---------------- | ------------------------ | ---------------- | ------------------------------------------------------------------- |
-| `entry`          | `string`                 | `"main.js"`      | Entry relative to the output; Vite uses the `main.outFile` basename |
-| `electronPath`   | `string`                 | resolved locally | Path to the Electron binary                                         |
-| `debounceMs`     | `number`                 | `150`            | Delay before restarting after a rebuild                             |
-| `additionalArgs` | `string[]`               | `[]`             | Arguments passed to Electron before the entry                       |
-| `cwd`            | `string`                 | `process.cwd()`  | Working directory for Electron                                      |
-| `env`            | `Record<string, string>` | `{}`             | Environment variables merged with `process.env`                     |
-| `stdinControls`  | `boolean`                | `true`           | Enable interactive terminal commands                                |
-| `clearScreen`    | `boolean`                | `false`          | Clear the terminal before launching                                 |
-| `logger`         | `LoggerLike`             | console logger   | Custom `error`/`warn`/`info`/`debug` logger                         |
+| Option                 | Type                     | Default          | Description                                                         |
+| ---------------------- | ------------------------ | ---------------- | ------------------------------------------------------------------- |
+| `entry`                | `string`                 | `"main.js"`      | Entry relative to the output; Vite uses the `main.outFile` basename |
+| `electronPath`         | `string`                 | resolved locally | Path to the Electron binary                                         |
+| `debounceMs`           | `number`                 | `150`            | Delay before restarting after a rebuild                             |
+| `additionalArgs`       | `string[]`               | `[]`             | Arguments passed to Electron before the entry                       |
+| `cwd`                  | `string`                 | `process.cwd()`  | Working directory for Electron                                      |
+| `env`                  | `Record<string, string>` | `{}`             | Environment variables merged with `process.env`                     |
+| `stdinControls`        | `boolean`                | `true`           | Enable interactive terminal commands                                |
+| `manageProcessSignals` | `boolean`                | see below        | Stop Electron and exit the host on `SIGINT`, `SIGTERM`, or `SIGHUP` |
+| `clearScreen`          | `boolean`                | `false`          | Clear the terminal before launching                                 |
+| `logger`               | `LoggerLike`             | console logger   | Custom `error`/`warn`/`info`/`debug` logger                         |
+
+The standalone runner and Rollup plugin default `manageProcessSignals` to
+`true`, preserving their ownership of process shutdown. The Vite plugin is
+embedded in Vite's dev server and defaults it to `false`, so Ctrl-C can finish
+Vite's asynchronous shutdown before the watched build closes the runner and
+stops Electron. An explicit `runner.manageProcessSignals` value always wins.
 
 ## Standalone runner
 
@@ -235,6 +242,10 @@ runner.scheduleRestart({ dir: "dist" }, "rebuild");
 // When your watcher shuts down:
 await runner.close();
 ```
+
+Standalone runners own process signals by default. Set
+`manageProcessSignals: false` when embedding one in a host that owns shutdown,
+and make that host await `runner.close()` from its close hook.
 
 The runner stores process identity records under
 `node_modules/.cache/electron-run/`. A normal watcher close stops the process

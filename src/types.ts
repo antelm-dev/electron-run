@@ -64,6 +64,11 @@ export interface ElectronRunOptions {
   env?: Record<string, string>;
   /** Enable interactive stdin commands (rs, start, stop, …). Defaults to `true`. */
   stdinControls?: boolean;
+  /**
+   * Install process signal handlers that stop Electron and exit the host process.
+   * Defaults to `true`; embedded hosts such as the Vite plugin default this to `false`.
+   */
+  manageProcessSignals?: boolean;
   /** Clear the terminal before each launch. Defaults to `false`. */
   clearScreen?: boolean;
   /** Custom logger. Defaults to a labelled console logger. */
