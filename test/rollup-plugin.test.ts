@@ -27,6 +27,24 @@ beforeEach(() => {
 });
 
 describe("electronRun", () => {
+  it("rejects invalid options before creating a plugin or runner", () => {
+    expect(() =>
+      electronRun({ entry: [], clearScren: true, manageProcessSignals: "yes" } as never),
+    ).toThrow(
+      expect.objectContaining({
+        message: expect.stringMatching(
+          /options\.clearScren[\s\S]*options\.entry[\s\S]*options\.manageProcessSignals/,
+        ),
+      }),
+    );
+    expect(createElectronRunner).not.toHaveBeenCalled();
+  });
+
+  it("accepts explicit process signal ownership booleans", () => {
+    expect(() => electronRun({ manageProcessSignals: true })).not.toThrow();
+    expect(() => electronRun({ manageProcessSignals: false })).not.toThrow();
+  });
+
   it("does nothing for a one-shot build", async () => {
     const plugin = electronRun();
 

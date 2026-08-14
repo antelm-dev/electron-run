@@ -27,6 +27,7 @@ import {
 } from "./process.js";
 import { createTaskQueue } from "./task-queue.js";
 import type { BundleOutputLocation, Command, ElectronRunOptions, LaunchContext } from "./types.js";
+import { validateBundleEntry, validateElectronRunOptions } from "./validation.js";
 
 export type { ElectronRunOptions } from "./types.js";
 
@@ -103,6 +104,7 @@ async function waitForPidExit(pid: number, timeoutMs: number): Promise<boolean> 
  * ```
  */
 export function createElectronRunner(options: ElectronRunOptions = {}): ElectronRunner {
+  validateElectronRunOptions(options);
   const entry = options.entry ?? DEFAULT_ENTRY;
   const debounceMs = options.debounceMs ?? DEFAULT_DEBOUNCE_MS;
   const additionalArgs = options.additionalArgs ?? [];
@@ -439,12 +441,7 @@ export function createElectronRunner(options: ElectronRunOptions = {}): Electron
     }
   }
 
-  function createLaunchContext(output: BundleOutputLocation): LaunchContext {
-    const outDir = output.dir
-      ? path.resolve(cwd, output.dir)
-      : path.dirname(output.file ? path.resolve(cwd, output.file) : "");
-    const entryFile = path.resolve(outDir || cwd, entry);
-
+  function createLaunchContext(entryFile: string): LaunchContext {
     return {
       cwd,
       env,
@@ -503,8 +500,9 @@ export function createElectronRunner(options: ElectronRunOptions = {}): Electron
         return;
       }
       clearTimeout(restartTimer);
+      const { entryFile } = validateBundleEntry(output, cwd, entry);
       restartTimer = setTimeout(() => {
-        const context = createLaunchContext(output);
+        const context = createLaunchContext(entryFile);
         run(() => restartElectron(context, reason));
       }, debounceMs);
     },

@@ -1,6 +1,7 @@
 import type { OutputOptions, Plugin } from "rollup";
 import { createElectronRunner, type ElectronRunner } from "./core.js";
 import type { ElectronRunOptions } from "./types.js";
+import { validateElectronRunOptions } from "./validation.js";
 
 export type { ElectronRunOptions } from "./types.js";
 
@@ -26,6 +27,7 @@ export type { ElectronRunOptions } from "./types.js";
  * ```
  */
 export default function electronRun(options?: ElectronRunOptions): Plugin {
+  validateElectronRunOptions(options ?? {});
   let runner: ElectronRunner | undefined;
 
   return {

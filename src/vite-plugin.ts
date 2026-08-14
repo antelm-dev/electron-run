@@ -13,6 +13,7 @@ import {
 import electronRun from "./rollup-plugin.js";
 import { resolveElectronTarget, type ElectronNodeTarget } from "./process.js";
 import type { ElectronRunOptions } from "./types.js";
+import { validateVitePluginOptions } from "./validation.js";
 
 export interface ElectronViteTargetOptions {
   /** TypeScript or JavaScript entry file for this Electron target. */
@@ -90,19 +91,6 @@ function sourceFiles(directory: string): string[] {
   } catch {
     return [];
   }
-}
-
-function resolveTarget(
-  cwd: string,
-  target: ElectronViteTargetOptions,
-  defaultOutFile: string,
-): ResolvedTarget {
-  return {
-    ...target,
-    input: path.resolve(cwd, target.input),
-    outFile: path.resolve(cwd, target.outFile ?? defaultOutFile),
-    watch: target.watch?.map((file) => path.resolve(cwd, file)),
-  };
 }
 
 function targetConfig(
@@ -196,13 +184,13 @@ function rendererUrl(server: ViteDevServer): string {
  * are ready.
  */
 export default function electronVite(options: ElectronVitePluginOptions): Plugin {
-  const cwd = path.resolve(options.cwd ?? process.cwd());
+  const validated = validateVitePluginOptions(options);
+  const cwd = validated.cwd;
   const runtime = resolveElectronTarget(cwd);
-  const main = resolveTarget(cwd, options.main, "out/main/index.cjs");
-  const preload = options.preload
-    ? resolveTarget(cwd, options.preload, "out/preload/index.cjs")
-    : undefined;
-  const urlEnvironment = options.devServerUrlEnv ?? "VITE_DEV_SERVER_URL";
+  const main = validated.main as ResolvedTarget;
+  const preload = validated.preload as ResolvedTarget | undefined;
+  const runner = validated.runner;
+  const urlEnvironment = validated.devServerUrlEnv;
   let command: "build" | "serve" = "serve";
   const parentEnvironment: ParentEnvironment = {};
   let watcher: RollupWatcher | undefined;
@@ -213,11 +201,11 @@ export default function electronVite(options: ElectronVitePluginOptions): Plugin
     const config = targetConfig(main, development, parentEnvironment, runtime.target);
     const mainSourcemap = main.sourcemap ?? development;
     const runnerEnvironment = {
-      ...options.runner?.env,
+      ...runner?.env,
       [urlEnvironment]: url ?? "",
     };
     if (development && mainSourcemap !== false) {
-      const existingNodeOptions = options.runner?.env?.NODE_OPTIONS ?? process.env.NODE_OPTIONS;
+      const existingNodeOptions = runner?.env?.NODE_OPTIONS ?? process.env.NODE_OPTIONS;
       runnerEnvironment.NODE_OPTIONS = /(?:^|\s)--enable-source-maps(?:\s|$)/.test(
         existingNodeOptions ?? "",
       )
@@ -230,10 +218,10 @@ export default function electronVite(options: ElectronVitePluginOptions): Plugin
       preload && preloadFirst(preload, development, parentEnvironment, runtime.target),
       development &&
         electronRun({
-          ...options.runner,
-          cwd: options.runner?.cwd ?? cwd,
-          entry: options.runner?.entry ?? path.basename(main.outFile),
-          manageProcessSignals: options.runner?.manageProcessSignals ?? false,
+          ...runner,
+          cwd: runner?.cwd ?? cwd,
+          entry: runner?.entry ?? path.basename(main.outFile),
+          manageProcessSignals: runner?.manageProcessSignals ?? false,
           env: runnerEnvironment,
         }),
     ];
