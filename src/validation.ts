@@ -235,9 +235,10 @@ function validateRunnerPaths(
   options: Record<string, unknown>,
   prefix: string,
   issues: ValidationIssue[],
+  defaultCwd = process.cwd(),
 ) {
   const cwd = path.resolve(
-    typeof options.cwd === "string" && options.cwd ? options.cwd : process.cwd(),
+    typeof options.cwd === "string" && options.cwd ? options.cwd : defaultCwd,
   );
   if (accessibleKind(cwd) !== "directory") {
     issues.push({
@@ -473,7 +474,7 @@ export function validateVitePluginOptions(options: unknown): ValidatedViteOption
     validateRunnerRecord(optionRecord.runner, "runner", issues) &&
     isRecord(optionRecord.runner)
   ) {
-    validateRunnerPaths(optionRecord.runner, "runner", issues);
+    validateRunnerPaths(optionRecord.runner, "runner", issues, cwd);
   }
   if (optionRecord.devServerUrlEnv !== undefined) {
     expectString(optionRecord.devServerUrlEnv, "devServerUrlEnv", issues);
