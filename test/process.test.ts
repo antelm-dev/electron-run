@@ -1,9 +1,19 @@
 import cp from "node:child_process";
+import fs from "node:fs";
 import os from "node:os";
+import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { clearTerminal, isProcessAlive, killTree, resolveElectronBinary } from "../src/process.js";
+import {
+  clearTerminal,
+  electronNodeTarget,
+  isProcessAlive,
+  killTree,
+  resolveElectronBinary,
+  resolveElectronTarget,
+} from "../src/process.js";
 
 const originalPlatform = process.platform;
+const fixtures: string[] = [];
 
 function setPlatform(value: NodeJS.Platform) {
   Object.defineProperty(process, "platform", { value, configurable: true });
@@ -11,8 +21,19 @@ function setPlatform(value: NodeJS.Platform) {
 
 afterEach(() => {
   setPlatform(originalPlatform);
+  for (const fixture of fixtures.splice(0)) fs.rmSync(fixture, { recursive: true, force: true });
   vi.restoreAllMocks();
 });
+
+function electronFixture(version: unknown): string {
+  const fixture = fs.mkdtempSync(path.join(os.tmpdir(), "electron-run-target-"));
+  fixtures.push(fixture);
+  const packageDirectory = path.join(fixture, "node_modules/electron");
+  fs.mkdirSync(packageDirectory, { recursive: true });
+  fs.writeFileSync(path.join(fixture, "package.json"), "{}");
+  fs.writeFileSync(path.join(packageDirectory, "package.json"), JSON.stringify({ version }));
+  return fixture;
+}
 
 describe("killTree", () => {
   it("resolves immediately when no pid is given", async () => {
@@ -124,6 +145,46 @@ describe("resolveElectronBinary", () => {
     // reach electron. Whether the binary is downloaded is not this test's
     // business — it only asserts that resolution did not give up.
     expect(() => resolveElectronBinary(os.tmpdir())).not.toThrow(/Cannot resolve/);
+  });
+});
+
+describe("Electron target resolution", () => {
+  it.each([
+    ["22.3.0", "node16"],
+    ["23.0.0", "node18"],
+    ["28.3.3", "node18"],
+    ["29.0.0", "node20"],
+    ["34.5.8", "node20"],
+    ["35.0.0", "node22"],
+    ["39.7.2", "node22"],
+    ["40.0.0", "node24"],
+  ] as const)("maps Electron %s to %s", (version, target) => {
+    expect(electronNodeTarget(version)).toBe(target);
+  });
+
+  it.each([undefined, null, "", "v40.0.0", "not-semver"])(
+    "rejects malformed version %j",
+    (version) => {
+      expect(electronNodeTarget(version)).toBeUndefined();
+    },
+  );
+
+  it("prefers the consuming project's Electron package", () => {
+    const fixture = electronFixture("28.2.0");
+
+    expect(resolveElectronTarget(fixture)).toEqual({
+      electronVersion: "28.2.0",
+      target: "node18",
+    });
+  });
+
+  it("falls back to node16 for malformed consumer package metadata", () => {
+    const fixture = electronFixture("future");
+
+    expect(resolveElectronTarget(fixture)).toMatchObject({
+      target: "node16",
+      fallbackReason: expect.stringContaining("does not contain a valid Electron version"),
+    });
   });
 });
 

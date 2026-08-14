@@ -11,6 +11,7 @@ import {
   type ViteDevServer,
 } from "vite";
 import electronRun from "./rollup-plugin.js";
+import { resolveElectronTarget, type ElectronNodeTarget } from "./process.js";
 import type { ElectronRunOptions } from "./types.js";
 
 export interface ElectronViteTargetOptions {
@@ -22,7 +23,7 @@ export interface ElectronViteTargetOptions {
   plugins?: PluginOption[];
   /** Additional modules to keep external alongside Electron and Node built-ins. */
   external?: ExternalOption;
-  /** JavaScript compilation target. Defaults to `node16`. */
+  /** JavaScript compilation target. Defaults from the installed Electron version. */
   target?: BuildOptions["target"];
   /** Override source-map generation. Defaults to `true` in development. */
   sourcemap?: BuildOptions["sourcemap"];
@@ -108,6 +109,7 @@ function targetConfig(
   target: ResolvedTarget,
   development: boolean,
   environment: ParentEnvironment,
+  defaultTarget: ElectronNodeTarget,
 ): InlineConfig {
   const output: OutputOptions = {
     entryFileNames: path.basename(target.outFile),
@@ -131,7 +133,7 @@ function targetConfig(
     ssr: { noExternal: true },
     build: {
       ssr: target.input,
-      target: target.target ?? "node16",
+      target: target.target ?? defaultTarget,
       outDir: path.dirname(target.outFile),
       emptyOutDir: false,
       copyPublicDir: false,
@@ -158,6 +160,7 @@ function preloadFirst(
   preload: ResolvedTarget,
   development: boolean,
   environment: ParentEnvironment,
+  defaultTarget: ElectronNodeTarget,
 ): RollupPlugin {
   return {
     name: "electron-run:preload-first",
@@ -170,7 +173,7 @@ function preloadFirst(
           for (const file of sourceFiles(path.dirname(preload.input))) this.addWatchFile(file);
           for (const file of preload.watch ?? []) this.addWatchFile(file);
         }
-        await build(targetConfig(preload, development, environment));
+        await build(targetConfig(preload, development, environment, defaultTarget));
       },
     },
   };
@@ -194,6 +197,7 @@ function rendererUrl(server: ViteDevServer): string {
  */
 export default function electronVite(options: ElectronVitePluginOptions): Plugin {
   const cwd = path.resolve(options.cwd ?? process.cwd());
+  const runtime = resolveElectronTarget(cwd);
   const main = resolveTarget(cwd, options.main, "out/main/index.cjs");
   const preload = options.preload
     ? resolveTarget(cwd, options.preload, "out/preload/index.cjs")
@@ -206,21 +210,31 @@ export default function electronVite(options: ElectronVitePluginOptions): Plugin
   let closing: Promise<void> | undefined;
 
   const mainConfig = (development: boolean, url?: string): InlineConfig => {
-    const config = targetConfig(main, development, parentEnvironment);
+    const config = targetConfig(main, development, parentEnvironment, runtime.target);
+    const mainSourcemap = main.sourcemap ?? development;
+    const runnerEnvironment = {
+      ...options.runner?.env,
+      [urlEnvironment]: url ?? "",
+    };
+    if (development && mainSourcemap !== false) {
+      const existingNodeOptions = options.runner?.env?.NODE_OPTIONS ?? process.env.NODE_OPTIONS;
+      runnerEnvironment.NODE_OPTIONS = /(?:^|\s)--enable-source-maps(?:\s|$)/.test(
+        existingNodeOptions ?? "",
+      )
+        ? existingNodeOptions!
+        : [existingNodeOptions, "--enable-source-maps"].filter(Boolean).join(" ");
+    }
     config.plugins = [
       ...(main.plugins ?? []),
       development && Boolean(main.watch?.length) && watchMain(main),
-      preload && preloadFirst(preload, development, parentEnvironment),
+      preload && preloadFirst(preload, development, parentEnvironment, runtime.target),
       development &&
         electronRun({
           ...options.runner,
           cwd: options.runner?.cwd ?? cwd,
           entry: options.runner?.entry ?? path.basename(main.outFile),
           manageProcessSignals: options.runner?.manageProcessSignals ?? false,
-          env: {
-            ...options.runner?.env,
-            [urlEnvironment]: url ?? "",
-          },
+          env: runnerEnvironment,
         }),
     ];
     if (development) config.build = { ...config.build, watch: {} };
@@ -246,6 +260,15 @@ export default function electronVite(options: ElectronVitePluginOptions): Plugin
       command = config.command;
       parentEnvironment.mode = config.mode;
       parentEnvironment.envDir = config.envDir;
+      if (runtime.fallbackReason) {
+        config.logger.warn(
+          `[electron-run] ${runtime.fallbackReason}; using fallback build target ${runtime.target}`,
+        );
+      } else {
+        config.logger.info(
+          `[electron-run] Electron ${runtime.electronVersion} detected; using build target ${runtime.target}`,
+        );
+      }
     },
     async closeBundle() {
       if (command === "build") await build(mainConfig(false));
