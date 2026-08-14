@@ -121,4 +121,49 @@ describe("electronVite consumer build", () => {
       await server.close();
     }
   }, 20_000);
+
+  it("maps development main-process stacks back to TypeScript source", async () => {
+    fixture = await mkdtemp(path.join(process.cwd(), ".electron-run-vite-trace-"));
+    const renderer = path.join(fixture, "renderer");
+    const stackFile = path.join(fixture, "stack.txt");
+    await mkdir(renderer, { recursive: true });
+    await writeFile(path.join(renderer, "index.html"), "<!doctype html><h1>ready</h1>");
+    await writeFile(
+      path.join(fixture, "main.ts"),
+      [
+        'import { writeFileSync } from "node:fs";',
+        "function captureMappedStack(): void {",
+        `  writeFileSync(${JSON.stringify(stackFile)}, new Error("mapped trace").stack ?? "");`,
+        "}",
+        "captureMappedStack();",
+      ].join("\n"),
+    );
+
+    const server = await createServer({
+      configFile: false,
+      root: renderer,
+      logLevel: "silent",
+      server: { host: "127.0.0.1", port: 0 },
+      plugins: [
+        electronVite({
+          cwd: fixture,
+          main: { input: "main.ts" },
+          runner: {
+            electronPath: process.execPath,
+            stdinControls: false,
+            env: { ELECTRON_RUN_TRACE_TEST: "preserved" },
+          },
+        }),
+      ],
+    });
+
+    try {
+      await server.listen();
+      await vi.waitFor(async () => expect(existsSync(stackFile)).toBe(true), { timeout: 10_000 });
+      const stack = await readFile(stackFile, "utf8");
+      expect(stack).toContain("main.ts:3:");
+    } finally {
+      await server.close();
+    }
+  }, 20_000);
 });

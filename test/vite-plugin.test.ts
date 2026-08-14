@@ -32,7 +32,17 @@ beforeEach(() => {
   mocks.electronRun.mockClear();
   mocks.watcher.close.mockClear();
   mocks.build.mockResolvedValue(mocks.watcher);
+  vi.unstubAllEnvs();
 });
+
+function resolvedConfig(command: "build" | "serve", mode: string, envDir: string | false) {
+  return {
+    command,
+    mode,
+    envDir,
+    logger: { info: vi.fn(), warn: vi.fn() },
+  };
+}
 
 describe("electronVite", () => {
   it("builds preload before main during a production app build", async () => {
@@ -44,7 +54,7 @@ describe("electronVite", () => {
     });
 
     const envDir = path.join(cwd, "config/env");
-    hook(plugin, "configResolved")({ command: "build", mode: "staging", envDir });
+    hook(plugin, "configResolved")(resolvedConfig("build", "staging", envDir));
     await hook(plugin, "closeBundle").call({ meta: { watchMode: false } });
 
     expect(mocks.build).toHaveBeenCalledOnce();
@@ -55,6 +65,7 @@ describe("electronVite", () => {
       "import.meta.env.PROD": "true",
     });
     expect(mainConfig.build?.ssr).toBe(path.join(cwd, "src/main.ts"));
+    expect(mainConfig.build?.target).toBe("node24");
     expect(mainConfig.build?.rollupOptions?.output).toMatchObject({
       entryFileNames: "index.cjs",
       format: "cjs",
@@ -74,6 +85,7 @@ describe("electronVite", () => {
       "import.meta.env.PROD": "true",
     });
     expect(preloadConfig.build?.ssr).toBe(path.join(cwd, "src/preload.ts"));
+    expect(preloadConfig.build?.target).toBe("node24");
     expect(preloadConfig.build?.rollupOptions?.output).toMatchObject({
       entryFileNames: "index.cjs",
       format: "cjs",
@@ -83,14 +95,19 @@ describe("electronVite", () => {
   });
 
   it("starts a watched build with the resolved renderer URL and closes it with Vite", async () => {
+    vi.stubEnv("NODE_OPTIONS", "--trace-warnings");
     const cwd = path.resolve("fixture");
     const plugin = electronVite({
       cwd,
       main: { input: "src/main.ts", watch: ["generated/main-state.json"] },
-      runner: { stdinControls: false },
+      runner: {
+        stdinControls: false,
+        additionalArgs: ["--inspect=0"],
+        env: { CUSTOM_RUNNER_VALUE: "preserved" },
+      },
     });
     const envDir = path.join(cwd, "config/env");
-    hook(plugin, "configResolved")({ command: "serve", mode: "development", envDir });
+    hook(plugin, "configResolved")(resolvedConfig("serve", "development", envDir));
 
     const httpServer = Object.assign(new EventEmitter(), { listening: false });
     const server = {
@@ -111,7 +128,12 @@ describe("electronVite", () => {
         entry: "index.cjs",
         stdinControls: false,
         manageProcessSignals: false,
-        env: { VITE_DEV_SERVER_URL: "http://localhost:4173/" },
+        additionalArgs: ["--inspect=0"],
+        env: {
+          CUSTOM_RUNNER_VALUE: "preserved",
+          NODE_OPTIONS: "--trace-warnings --enable-source-maps",
+          VITE_DEV_SERVER_URL: "http://localhost:4173/",
+        },
       }),
     );
     const watchedConfig = mocks.build.mock.calls[0]![0];
@@ -161,7 +183,7 @@ describe("electronVite", () => {
       },
     });
 
-    hook(plugin, "configResolved")({ command: "build", mode: "production", envDir: false });
+    hook(plugin, "configResolved")(resolvedConfig("build", "production", false));
     await hook(plugin, "closeBundle").call({ meta: { watchMode: false } });
 
     expect(mocks.build.mock.calls[0]![0]).toMatchObject({
@@ -171,5 +193,52 @@ describe("electronVite", () => {
         "import.meta.env.PROD": "true",
       },
     });
+  });
+
+  it("honors explicit main and preload targets", async () => {
+    const plugin = electronVite({
+      main: { input: "src/main.ts", target: "node20" },
+      preload: { input: "src/preload.ts", target: "node18" },
+    });
+
+    hook(plugin, "configResolved")(resolvedConfig("build", "production", false));
+    await hook(plugin, "closeBundle").call({ meta: { watchMode: false } });
+    const mainConfig = mocks.build.mock.calls[0]![0];
+    expect(mainConfig.build?.target).toBe("node20");
+
+    const preloadPlugin = (mainConfig.plugins as Plugin[]).find(
+      (candidate) => candidate?.name === "electron-run:preload-first",
+    )!;
+    await hook(preloadPlugin, "buildStart").call({ addWatchFile: vi.fn() });
+    expect(mocks.build.mock.calls[1]![0].build?.target).toBe("node18");
+  });
+
+  it("does not inject source-map support when main sourcemaps are disabled", async () => {
+    const plugin = electronVite({
+      main: { input: "src/main.ts", sourcemap: false },
+      runner: { env: { NODE_OPTIONS: "--trace-warnings", CUSTOM_VALUE: "preserved" } },
+    });
+    hook(plugin, "configResolved")(resolvedConfig("serve", "development", false));
+    const server = {
+      httpServer: Object.assign(new EventEmitter(), { listening: true }),
+      resolvedUrls: { local: ["http://localhost:5173/"], network: [] },
+      config: {
+        server: {},
+        logger: { error: vi.fn() },
+      },
+    } as unknown as ViteDevServer;
+
+    hook(plugin, "configureServer")(server);
+    await vi.waitFor(() => expect(mocks.electronRun).toHaveBeenCalledOnce());
+
+    expect(mocks.electronRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        env: {
+          NODE_OPTIONS: "--trace-warnings",
+          CUSTOM_VALUE: "preserved",
+          VITE_DEV_SERVER_URL: "http://localhost:5173/",
+        },
+      }),
+    );
   });
 });

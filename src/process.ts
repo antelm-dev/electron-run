@@ -6,6 +6,72 @@ import path from "node:path";
 /** ANSI sequence that clears the screen and the scrollback buffer. */
 const CLEAR_SEQUENCE = "\x1b[2J\x1b[3J\x1b[H";
 
+export type ElectronNodeTarget = "node16" | "node18" | "node20" | "node22" | "node24";
+
+export interface ElectronTargetResolution {
+  /** Installed Electron package version, when it could be read and parsed. */
+  electronVersion?: string;
+  /** Vite build target compatible with the installed Electron runtime. */
+  target: ElectronNodeTarget;
+  /** Why the conservative fallback was selected. */
+  fallbackReason?: string;
+}
+
+function electronResolutionBases(cwd: string): string[] {
+  return [path.resolve(cwd, "package.json"), import.meta.url];
+}
+
+/** Map a valid Electron version to the Node target embedded by that release. */
+export function electronNodeTarget(version: unknown): ElectronNodeTarget | undefined {
+  if (typeof version !== "string") return undefined;
+  const match = /^(\d+)(?:\.|$)/.exec(version);
+  if (!match) return undefined;
+  const major = Number(match[1]);
+  if (!Number.isSafeInteger(major)) return undefined;
+  if (major >= 40) return "node24";
+  if (major >= 35) return "node22";
+  if (major >= 29) return "node20";
+  if (major >= 23) return "node18";
+  return "node16";
+}
+
+/** Resolve the consumer's Electron version and its compatible default Vite target. */
+export function resolveElectronTarget(cwd: string = process.cwd()): ElectronTargetResolution {
+  for (const from of electronResolutionBases(cwd)) {
+    const require = createRequire(from);
+    let packagePath: string;
+    try {
+      packagePath = require.resolve("electron/package.json");
+    } catch {
+      continue;
+    }
+
+    try {
+      const packageJson = JSON.parse(fs.readFileSync(packagePath, "utf8")) as {
+        version?: unknown;
+      };
+      const target = electronNodeTarget(packageJson.version);
+      if (target) {
+        return { electronVersion: packageJson.version as string, target };
+      }
+      return {
+        target: "node16",
+        fallbackReason: `${packagePath} does not contain a valid Electron version`,
+      };
+    } catch {
+      return {
+        target: "node16",
+        fallbackReason: `${packagePath} could not be read as Electron package metadata`,
+      };
+    }
+  }
+
+  return {
+    target: "node16",
+    fallbackReason: "electron/package.json could not be resolved",
+  };
+}
+
 /**
  * Resolve the absolute path to the Electron binary via the `electron` package.
  *
@@ -15,7 +81,7 @@ const CLEAR_SEQUENCE = "\x1b[2J\x1b[3J\x1b[H";
  * flat/hoisted layouts working.
  */
 export function resolveElectronBinary(cwd: string = process.cwd()): string {
-  for (const from of [path.resolve(cwd, "package.json"), import.meta.url]) {
+  for (const from of electronResolutionBases(cwd)) {
     const require = createRequire(from);
 
     try {

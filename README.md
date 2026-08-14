@@ -103,6 +103,20 @@ values reversed for `vite build`. This avoids inheriting an ambiguous
 `process.env.VITE_DEV_SERVER_URL` for the live renderer URL. Target-level
 `define` values are applied last and can explicitly override these defaults.
 
+Unless a target is set explicitly, the plugin reads the consuming project's
+installed `electron/package.json` and chooses the matching Node build target:
+Electron 20–22 uses `node16`, 23–28 uses `node18`, 29–34 uses `node20`, 35–39
+uses `node22`, and 40 or newer uses `node24`. If Electron metadata is missing
+or malformed, the plugin reports the reason once and conservatively falls back
+to `node16`. Explicit `target` values always win for both main and preload.
+
+Development main builds emit source maps by default. The runner adds Node's
+source-map support so uncaught errors and captured stacks point back to the
+original TypeScript source. Existing `runner.env.NODE_OPTIONS`, other runner
+environment variables, `additionalArgs`, and the renderer URL variable are
+preserved. Set `main.sourcemap: false` to disable both map emission and the
+injected source-map flag; production behavior is unchanged.
+
 Rollup-compatible plugins remain target-scoped. For example, attach the
 `electron-ipc-module` bridge generator to the main build:
 
@@ -198,7 +212,7 @@ Each main or preload target accepts these options:
 | `outFile`   | `string`                    | `out/main/index.cjs` or `out/preload/index.cjs` | Exact output file                             |
 | `plugins`   | `PluginOption[]`            | `[]`                                            | Target-scoped Vite/Rollup plugins             |
 | `external`  | `ExternalOption`            | Electron and Node built-ins                     | Additional modules to keep external           |
-| `target`    | `BuildOptions["target"]`    | `"node16"`                                      | JavaScript compilation target                 |
+| `target`    | `BuildOptions["target"]`    | detected from Electron (`node16` fallback)      | JavaScript compilation target                 |
 | `sourcemap` | `BuildOptions["sourcemap"]` | `true` during development                       | Source-map generation                         |
 | `minify`    | `BuildOptions["minify"]`    | `false`                                         | Vite minification setting                     |
 | `define`    | `Record<string, unknown>`   | none                                            | Target-scoped compile-time replacements       |
