@@ -125,7 +125,10 @@ describe("real child lifecycle", () => {
     writePidFile(recordPath, context, child.pid!, new Date().toISOString(), identity);
 
     const runner = createElectronRunner({ cwd, debounceMs: 1, stdinControls: false, logger });
+    fs.mkdirSync(path.join(cwd, "missing-output"));
+    fs.writeFileSync(path.join(cwd, "missing-output/main.js"), "// generated", "utf8");
     runner.scheduleRestart({ dir: "missing-output" }, "recover orphan");
+    fs.rmSync(path.join(cwd, "missing-output/main.js"));
     await waitUntil(() => !isProcessAlive(child.pid!) && !fs.existsSync(recordPath), 12_000);
     children.delete(child);
 

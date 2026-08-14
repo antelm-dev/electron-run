@@ -95,7 +95,7 @@ afterEach(() => {
 });
 
 describe("createElectronRunner", () => {
-  it("does not spawn when the entry file is missing", async () => {
+  it("rejects a missing generated entry before scheduling launch work", async () => {
     const spawn = vi.spyOn(cp, "spawn");
     const { logger, messages } = captureLogger();
 
@@ -106,12 +106,53 @@ describe("createElectronRunner", () => {
       logger,
     });
 
-    runner.scheduleRestart({ dir: outDir });
-    await flush();
+    expect(() => runner.scheduleRestart({ dir: outDir })).toThrow(
+      expect.objectContaining({
+        message: expect.stringContaining(`options.entry: expected a readable generated file`),
+      }),
+    );
     await runner.close();
 
     expect(spawn).not.toHaveBeenCalled();
-    expect(messages.some((m) => m.includes("Entry file not found"))).toBe(true);
+    expect(messages).toEqual([]);
+  });
+
+  it("aggregates invalid construction options before registering side effects", () => {
+    const signalListeners = process.listenerCount("SIGINT");
+
+    expect(() =>
+      createElectronRunner({
+        entry: 42,
+        debounceMs: -1,
+        additionalArgs: ["--inspect", false],
+        stdnControls: false,
+      } as never),
+    ).toThrow(
+      expect.objectContaining({
+        message: expect.stringMatching(
+          /options\.additionalArgs\[1\][\s\S]*options\.debounceMs[\s\S]*options\.entry[\s\S]*options\.stdnControls/,
+        ),
+      }),
+    );
+
+    expect(process.listenerCount("SIGINT")).toBe(signalListeners);
+  });
+
+  it("rejects mutually exclusive bundle locations before scheduling work", async () => {
+    fs.writeFileSync(path.join(outDir, "main.js"), "// entry", "utf8");
+    const runner = createElectronRunner({ cwd, stdinControls: false });
+
+    expect(() =>
+      runner.scheduleRestart({ dir: outDir, file: path.join(outDir, "app.js") }),
+    ).toThrow(
+      expect.objectContaining({
+        message: expect.stringMatching(
+          /output\.dir: cannot be combined with output\.file[\s\S]*output\.file: cannot be combined with output\.dir/,
+        ),
+      }),
+    );
+
+    await runner.close();
   });
 
   it("spawns Electron with resolved args and writes a pid file", async () => {
@@ -220,6 +261,19 @@ describe("createElectronRunner", () => {
     await runner.close();
   });
 
+  it("resolves an omitted standalone output location against the configured cwd", async () => {
+    fs.writeFileSync(path.join(cwd, "main.js"), "// entry", "utf-8");
+    const spawn = vi.spyOn(cp, "spawn").mockReturnValue(new FakeChild() as never);
+    const { logger } = captureLogger();
+
+    const runner = createElectronRunner({ cwd, debounceMs: 1, stdinControls: false, logger });
+    runner.scheduleRestart({});
+    await flush();
+
+    expect(spawn.mock.calls[0]?.[1]).toEqual([path.join(cwd, "main.js")]);
+    await runner.close();
+  });
+
   it("keeps the pid record when termination fails", async () => {
     fs.writeFileSync(path.join(outDir, "main.js"), "// entry", "utf-8");
     const child = new FakeChild();
@@ -271,7 +325,10 @@ describe("createElectronRunner", () => {
     const { logger, messages } = captureLogger();
     const runner = createElectronRunner({ cwd, debounceMs: 1, stdinControls: false, logger });
 
+    fs.mkdirSync(path.join(cwd, "missing"));
+    fs.writeFileSync(path.join(cwd, "missing/main.js"), "// generated", "utf8");
     runner.scheduleRestart({ dir: "missing" });
+    fs.rmSync(path.join(cwd, "missing/main.js"));
     await flush();
 
     expect(killTree).not.toHaveBeenCalled();

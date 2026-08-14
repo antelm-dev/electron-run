@@ -1,7 +1,9 @@
 import { EventEmitter } from "node:events";
+import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import type { Plugin, ViteDevServer } from "vite";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => {
   const watcher = { close: vi.fn(async () => {}) };
@@ -22,6 +24,8 @@ vi.mock("../src/rollup-plugin.js", () => ({ default: mocks.electronRun }));
 
 import electronVite from "../src/vite-plugin.js";
 
+let cwd: string;
+
 function hook<T extends keyof Plugin>(plugin: Plugin, name: T): (...args: any[]) => any {
   const value = plugin[name];
   return (typeof value === "object" ? value.handler : value) as (...args: any[]) => any;
@@ -33,6 +37,14 @@ beforeEach(() => {
   mocks.watcher.close.mockClear();
   mocks.build.mockResolvedValue(mocks.watcher);
   vi.unstubAllEnvs();
+  cwd = fs.mkdtempSync(path.join(os.tmpdir(), "electron-run-vite-options-"));
+  fs.mkdirSync(path.join(cwd, "src"), { recursive: true });
+  fs.writeFileSync(path.join(cwd, "src/main.ts"), "// main", "utf8");
+  fs.writeFileSync(path.join(cwd, "src/preload.ts"), "// preload", "utf8");
+});
+
+afterEach(() => {
+  fs.rmSync(cwd, { recursive: true, force: true });
 });
 
 function resolvedConfig(command: "build" | "serve", mode: string, envDir: string | false) {
@@ -46,7 +58,6 @@ function resolvedConfig(command: "build" | "serve", mode: string, envDir: string
 
 describe("electronVite", () => {
   it("builds preload before main during a production app build", async () => {
-    const cwd = path.resolve("fixture");
     const plugin = electronVite({
       cwd,
       main: { input: "src/main.ts", plugins: [{ name: "main-user-plugin" }] },
@@ -96,7 +107,8 @@ describe("electronVite", () => {
 
   it("starts a watched build with the resolved renderer URL and closes it with Vite", async () => {
     vi.stubEnv("NODE_OPTIONS", "--trace-warnings");
-    const cwd = path.resolve("fixture");
+    fs.mkdirSync(path.join(cwd, "generated"));
+    fs.writeFileSync(path.join(cwd, "generated/main-state.json"), "{}", "utf8");
     const plugin = electronVite({
       cwd,
       main: { input: "src/main.ts", watch: ["generated/main-state.json"] },
@@ -157,10 +169,11 @@ describe("electronVite", () => {
 
   it("allows an explicit runner setting to opt into process signal ownership", async () => {
     const plugin = electronVite({
+      cwd,
       main: { input: "src/main.ts" },
       runner: { manageProcessSignals: true },
     });
-    hook(plugin, "configResolved")({ command: "serve", mode: "development", envDir: false });
+    hook(plugin, "configResolved")(resolvedConfig("serve", "development", false));
     const server = {
       httpServer: undefined,
       resolvedUrls: { local: ["http://localhost:5173/"], network: [] },
@@ -177,6 +190,7 @@ describe("electronVite", () => {
 
   it("allows target define values to override the environment defaults", async () => {
     const plugin = electronVite({
+      cwd,
       main: {
         input: "src/main.ts",
         define: { "import.meta.env.DEV": "custom-development-flag" },
@@ -197,6 +211,7 @@ describe("electronVite", () => {
 
   it("honors explicit main and preload targets", async () => {
     const plugin = electronVite({
+      cwd,
       main: { input: "src/main.ts", target: "node20" },
       preload: { input: "src/preload.ts", target: "node18" },
     });
@@ -215,6 +230,7 @@ describe("electronVite", () => {
 
   it("does not inject source-map support when main sourcemaps are disabled", async () => {
     const plugin = electronVite({
+      cwd,
       main: { input: "src/main.ts", sourcemap: false },
       runner: { env: { NODE_OPTIONS: "--trace-warnings", CUSTOM_VALUE: "preserved" } },
     });
@@ -240,5 +256,39 @@ describe("electronVite", () => {
         },
       }),
     );
+  });
+
+  it("aggregates shapes, unknown keys, and unsafe paths before build work", () => {
+    fs.mkdirSync(path.join(cwd, "src/not-a-file"));
+    const outside = path.resolve(cwd, "../outside.cjs");
+
+    let failure: Error | undefined;
+    try {
+      electronVite({
+        cwd,
+        mian: {},
+        main: {
+          input: "src/not-a-file",
+          outFile: outside,
+          watch: ["missing.txt", "../outside.txt"],
+          sourcemap: "yes",
+          ouFile: "typo.cjs",
+        },
+        runner: { additionalArgs: "--inspect", clearScren: true },
+      } as never);
+    } catch (error) {
+      failure = error as Error;
+    }
+
+    expect(failure?.message).toMatch(
+      /main\.input: expected a readable file[\s\S]*main\.ouFile: unknown option[\s\S]*main\.outFile: must stay within[\s\S]*main\.sourcemap[\s\S]*main\.watch\[0\]: expected a readable file or directory[\s\S]*main\.watch\[1\]: must stay within[\s\S]*options\.mian: unknown option[\s\S]*runner\.additionalArgs[\s\S]*runner\.clearScren/,
+    );
+    expect(failure?.message).toContain(path.join(cwd, "src/not-a-file"));
+    expect(failure?.message).toContain(outside);
+    expect(failure?.message).toContain(path.join(cwd, "missing.txt"));
+    expect(failure?.message).toContain(path.resolve(cwd, "../outside.txt"));
+
+    expect(mocks.build).not.toHaveBeenCalled();
+    expect(mocks.electronRun).not.toHaveBeenCalled();
   });
 });

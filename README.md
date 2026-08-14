@@ -242,6 +242,33 @@ embedded in Vite's dev server and defaults it to `false`, so Ctrl-C can finish
 Vite's asynchronous shutdown before the watched build closes the runner and
 stops Electron. An explicit `runner.manageProcessSignals` value always wins.
 
+### Configuration validation
+
+All three public entry points validate their options before starting build or
+launch work. A single `Invalid electron-run configuration` error lists every
+detectable problem in option-path order, including unknown keys and invalid
+value shapes. Filesystem errors include the resolved absolute path, for
+example:
+
+```text
+Invalid electron-run configuration:
+- main.input: expected a readable file (resolved: /project/src/mian.ts)
+- main.outFile: must stay within the project directory (resolved: /shared/main.cjs)
+```
+
+For the Vite plugin, `cwd` must be a readable directory. Each `main.input` and
+`preload.input` must already be a readable file, and every extra `watch` entry
+must already be a readable file or directory. Inputs, outputs, and watch paths
+must resolve inside `cwd`; traversal, absolute paths outside the project, and
+symlinks that escape it are rejected. Output files may be generated later and
+therefore do not need to exist when the plugin is configured.
+
+Standalone and Rollup runner options are checked when their public API is
+called, before signal or stdin listeners are registered. The runner entry is a
+generated bundle artifact, so it is not required during runner construction;
+it is resolved and checked when `scheduleRestart` receives the completed bundle
+location. `output.dir` and `output.file` cannot be supplied together.
+
 ## Standalone runner
 
 Use the runner directly with another bundler or a custom watcher:
