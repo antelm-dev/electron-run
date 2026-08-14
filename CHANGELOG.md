@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.4.0](https://github.com/antelm-dev/electron-run/compare/v0.3.2...v0.4.0) (2026-08-14)
+
+
+### Features
+
+* validate electron run configuration ([69b5bf7](https://github.com/antelm-dev/electron-run/commit/69b5bf75d3ed027e7b4ea0af3ae05f3a52c87be1))
+
+
+### Bug Fixes
+
+* make process signal ownership host-aware ([7fba01e](https://github.com/antelm-dev/electron-run/commit/7fba01ebbd60a8fd1212f344a02fba7c57fe404c))
+* **vite:** detect electron runtime defaults ([8cedff2](https://github.com/antelm-dev/electron-run/commit/8cedff27ad4fa24a34c49851f9a4b35d4321a726))
+* **vite:** validate runner paths from plugin cwd ([fce7db7](https://github.com/antelm-dev/electron-run/commit/fce7db73581965328faa90910ebfd0e4f4ccfd3e))
+
 ## [0.3.2](https://github.com/antelm-dev/electron-run/compare/v0.3.1...v0.3.2) (2026-08-13)
 
 
