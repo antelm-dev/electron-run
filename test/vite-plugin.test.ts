@@ -110,6 +110,7 @@ describe("electronVite", () => {
       expect.objectContaining({
         entry: "index.cjs",
         stdinControls: false,
+        manageProcessSignals: false,
         env: { VITE_DEV_SERVER_URL: "http://localhost:4173/" },
       }),
     );
@@ -130,6 +131,26 @@ describe("electronVite", () => {
 
     httpServer.emit("close");
     await vi.waitFor(() => expect(mocks.watcher.close).toHaveBeenCalledOnce());
+  });
+
+  it("allows an explicit runner setting to opt into process signal ownership", async () => {
+    const plugin = electronVite({
+      main: { input: "src/main.ts" },
+      runner: { manageProcessSignals: true },
+    });
+    hook(plugin, "configResolved")({ command: "serve", mode: "development", envDir: false });
+    const server = {
+      httpServer: undefined,
+      resolvedUrls: { local: ["http://localhost:5173/"], network: [] },
+      config: { server: {}, logger: { error: vi.fn() } },
+    } as unknown as ViteDevServer;
+
+    hook(plugin, "configureServer")(server);
+    await vi.waitFor(() => expect(mocks.electronRun).toHaveBeenCalledOnce());
+
+    expect(mocks.electronRun).toHaveBeenCalledWith(
+      expect.objectContaining({ manageProcessSignals: true }),
+    );
   });
 
   it("allows target define values to override the environment defaults", async () => {

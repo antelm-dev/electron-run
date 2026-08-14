@@ -38,13 +38,16 @@ describe("electronRun", () => {
   });
 
   it("restarts Electron on every write in watch mode", async () => {
-    const plugin = electronRun({ entry: "app.js" });
+    const plugin = electronRun({ entry: "app.js", manageProcessSignals: false });
 
     callHook(plugin, "buildStart", true);
     callHook(plugin, "writeBundle", true);
     callHook(plugin, "writeBundle", true);
 
-    expect(createElectronRunner).toHaveBeenCalledWith({ entry: "app.js" });
+    expect(createElectronRunner).toHaveBeenCalledWith({
+      entry: "app.js",
+      manageProcessSignals: false,
+    });
     expect(runner.scheduleRestart).toHaveBeenCalledTimes(2);
     expect(runner.scheduleRestart).toHaveBeenLastCalledWith({ dir: "dist" }, "rebuild");
   });

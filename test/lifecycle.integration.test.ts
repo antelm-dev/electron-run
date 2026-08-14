@@ -80,6 +80,7 @@ describe("real child lifecycle", () => {
       electronPath: process.execPath,
       debounceMs: 1,
       stdinControls: false,
+      manageProcessSignals: false,
       logger,
     });
     runner.scheduleRestart({ dir: "dist" }, "integration test");

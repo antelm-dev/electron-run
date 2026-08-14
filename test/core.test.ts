@@ -303,6 +303,100 @@ describe("createElectronRunner", () => {
   });
 });
 
+describe("process signal ownership", () => {
+  const signals = ["SIGINT", "SIGTERM", "SIGHUP"] as const;
+
+  function listenerCounts() {
+    return new Map<NodeJS.Signals | "exit", number>([
+      ...signals.map((signal) => [signal, process.listenerCount(signal)] as const),
+      ["exit", process.listenerCount("exit")],
+    ]);
+  }
+
+  it("owns process signals by default and removes only its listeners on close", async () => {
+    const before = listenerCounts();
+    const unrelated = vi.fn();
+    process.on("SIGTERM", unrelated);
+    const { logger } = captureLogger();
+    const runner = createElectronRunner({ cwd, stdinControls: false, logger });
+
+    for (const signal of signals) {
+      expect(process.listenerCount(signal)).toBe(
+        before.get(signal)! + 1 + (signal === "SIGTERM" ? 1 : 0),
+      );
+    }
+    expect(process.listenerCount("exit")).toBe(before.get("exit")! + 1);
+
+    const closing = runner.close();
+    expect(runner.close()).toBe(closing);
+    await closing;
+
+    expect(process.listeners("SIGTERM")).toContain(unrelated);
+    process.off("SIGTERM", unrelated);
+    expect(listenerCounts()).toEqual(before);
+  });
+
+  it("registers no lifecycle listeners or exits the host when ownership is disabled", async () => {
+    fs.writeFileSync(path.join(outDir, "main.js"), "// entry", "utf-8");
+    const child = new FakeChild();
+    vi.spyOn(cp, "spawn").mockReturnValue(child as never);
+    const exit = vi.spyOn(process, "exit").mockImplementation((() => undefined) as never);
+    const before = listenerCounts();
+    const { logger } = captureLogger();
+    const runner = createElectronRunner({
+      cwd,
+      debounceMs: 1,
+      stdinControls: false,
+      manageProcessSignals: false,
+      logger,
+    });
+
+    expect(listenerCounts()).toEqual(before);
+    runner.scheduleRestart({ dir: outDir });
+    await flush();
+    await runner.close();
+    await runner.close();
+
+    expect(killTree).toHaveBeenCalledTimes(1);
+    expect(exit).not.toHaveBeenCalled();
+    expect(listenerCounts()).toEqual(before);
+  });
+
+  it("shares one close path when an owned signal initiates shutdown", async () => {
+    fs.writeFileSync(path.join(outDir, "main.js"), "// entry", "utf-8");
+    const child = new FakeChild();
+    vi.spyOn(cp, "spawn").mockReturnValue(child as never);
+    const exit = vi.spyOn(process, "exit").mockImplementation((() => undefined) as never);
+    const previousHandlers = new Set(process.listeners("SIGINT"));
+    const { logger } = captureLogger();
+    const runner = createElectronRunner({ cwd, debounceMs: 1, stdinControls: false, logger });
+    const signalHandler = process
+      .listeners("SIGINT")
+      .find((handler) => !previousHandlers.has(handler));
+
+    runner.scheduleRestart({ dir: outDir });
+    await flush();
+    signalHandler?.("SIGINT");
+    await vi.waitFor(() => expect(exit).toHaveBeenCalledWith(130));
+    await runner.close();
+
+    expect(signalHandler).toBeDefined();
+    expect(killTree).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not leak listeners across repeated runner sessions", async () => {
+    const before = listenerCounts();
+    const { logger } = captureLogger();
+
+    for (let index = 0; index < 3; index += 1) {
+      const runner = createElectronRunner({ cwd, stdinControls: false, logger });
+      await runner.close();
+    }
+
+    expect(listenerCounts()).toEqual(before);
+  });
+});
+
 describe("interactive stdin commands", () => {
   const realStdin = process.stdin;
   let stdin: PassThrough & { isTTY: boolean };

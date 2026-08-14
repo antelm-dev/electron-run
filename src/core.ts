@@ -109,6 +109,7 @@ export function createElectronRunner(options: ElectronRunOptions = {}): Electron
   const cwd = path.resolve(options.cwd ?? process.cwd());
   const env = options.env ?? {};
   const enableStdinControls = options.stdinControls ?? true;
+  const manageProcessSignals = options.manageProcessSignals ?? true;
   const clearScreen = options.clearScreen ?? false;
   const logger = options.logger ?? createLogger("electron-run");
   const electronBinary = options.electronPath;
@@ -320,9 +321,8 @@ export function createElectronRunner(options: ElectronRunOptions = {}): Electron
       }
 
       isShuttingDown = true;
-      clearTimeout(restartTimer);
       try {
-        await stopElectronProcess();
+        await closeRunner();
       } catch (error) {
         logger.error("Unable to stop Electron during shutdown", error);
       } finally {
@@ -454,7 +454,45 @@ export function createElectronRunner(options: ElectronRunOptions = {}): Electron
     };
   }
 
-  registerShutdown();
+  function closeRunner(): Promise<void> {
+    if (closePromise) {
+      return closePromise;
+    }
+    closed = true;
+    clearTimeout(restartTimer);
+
+    for (const [signal, handler] of signalHandlers) {
+      process.off(signal, handler);
+    }
+    signalHandlers.clear();
+    if (shutdownRegistered) {
+      process.off("exit", handleProcessExit);
+      shutdownRegistered = false;
+    }
+    if (stdinRegistered && registeredStdin) {
+      registeredStdin.off("data", handleStdinData);
+      const ownership = stdinOwnership.get(registeredStdin);
+      if (stdinOwnershipClaimed && ownership) {
+        ownership.activeRunners -= 1;
+        if (ownership.activeRunners === 0) {
+          if (!ownership.wasOriginallyFlowing && registeredStdin.listenerCount("data") === 0) {
+            registeredStdin.pause();
+          }
+          stdinOwnership.delete(registeredStdin);
+        }
+      }
+      stdinRegistered = false;
+      registeredStdin = null;
+      stdinOwnershipClaimed = false;
+    }
+
+    closePromise = enqueue(() => stopElectronProcess());
+    return closePromise;
+  }
+
+  if (manageProcessSignals) {
+    registerShutdown();
+  }
   if (enableStdinControls) {
     registerStdin();
   }
@@ -471,36 +509,7 @@ export function createElectronRunner(options: ElectronRunOptions = {}): Electron
       }, debounceMs);
     },
     close() {
-      if (closePromise) {
-        return closePromise;
-      }
-      closed = true;
-      clearTimeout(restartTimer);
-
-      for (const [signal, handler] of signalHandlers) {
-        process.off(signal, handler);
-      }
-      signalHandlers.clear();
-      process.off("exit", handleProcessExit);
-      if (stdinRegistered && registeredStdin) {
-        registeredStdin.off("data", handleStdinData);
-        const ownership = stdinOwnership.get(registeredStdin);
-        if (stdinOwnershipClaimed && ownership) {
-          ownership.activeRunners -= 1;
-          if (ownership.activeRunners === 0) {
-            if (!ownership.wasOriginallyFlowing && registeredStdin.listenerCount("data") === 0) {
-              registeredStdin.pause();
-            }
-            stdinOwnership.delete(registeredStdin);
-          }
-        }
-        stdinRegistered = false;
-        registeredStdin = null;
-        stdinOwnershipClaimed = false;
-      }
-
-      closePromise = enqueue(() => stopElectronProcess());
-      return closePromise;
+      return closeRunner();
     },
   };
 }
