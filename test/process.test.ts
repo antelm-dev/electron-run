@@ -40,7 +40,7 @@ describe("killTree", () => {
     await expect(killTree(undefined)).resolves.toBeUndefined();
   });
 
-  it("uses non-forceful taskkill first on win32", async () => {
+  it("targets the pid alone for a graceful taskkill on win32", async () => {
     setPlatform("win32");
     const execFile = vi.spyOn(cp, "execFile").mockImplementation(((...callArgs: unknown[]) => {
       const cb = callArgs.at(-1) as (err: Error | null) => void;
@@ -50,10 +50,10 @@ describe("killTree", () => {
 
     await killTree(4242);
 
-    expect(execFile).toHaveBeenCalledWith("taskkill", ["/pid", "4242", "/T"], expect.any(Function));
+    expect(execFile).toHaveBeenCalledWith("taskkill", ["/pid", "4242"], expect.any(Function));
   });
 
-  it("adds /F only for a forceful Windows termination", async () => {
+  it("adds /T /F only for a forceful Windows termination", async () => {
     setPlatform("win32");
     const execFile = vi.spyOn(cp, "execFile").mockImplementation(((...callArgs: unknown[]) => {
       const cb = callArgs.at(-1) as (err: Error | null) => void;

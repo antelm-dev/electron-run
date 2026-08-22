@@ -104,7 +104,10 @@ export function resolveElectronBinary(cwd: string = process.cwd()): string {
 /**
  * Signal a process and its whole tree.
  *
- * On Windows this shells out to `taskkill /T`, adding `/F` only for SIGKILL. On
+ * On Windows this shells out to `taskkill`. The graceful attempt targets the pid
+ * alone: `/T` walks the tree bottom-up and windowless helper processes (Electron's
+ * renderer/GPU children) can only be killed forcefully, so the whole call fails and
+ * the main window never receives its close message. SIGKILL uses `/T /F`. On
  * POSIX the child is spawned detached, so the negated pid reaches the whole
  * process group (Electron's helper processes included); a lone process without
  * a group is signalled directly. Already-dead processes (`ESRCH`) are ignored.
@@ -120,9 +123,9 @@ export function killTree(
     }
 
     if (process.platform === "win32") {
-      const args = ["/pid", String(pid), "/T"];
+      const args = ["/pid", String(pid)];
       if (signal === "SIGKILL") {
-        args.push("/F");
+        args.push("/T", "/F");
       }
       cp.execFile("taskkill", args, (error) => {
         if (!error || !isProcessAlive(pid)) {
