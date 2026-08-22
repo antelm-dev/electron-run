@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.1](https://github.com/antelm-dev/electron-run/compare/v0.4.0...v0.4.1) (2026-08-22)
+
+
+### Bug Fixes
+
+* **process:** target the pid alone for graceful taskkill on Windows ([de68f56](https://github.com/antelm-dev/electron-run/commit/de68f56cb5ccf0761e5633786989b33f8d45f387))
+
 ## [0.4.0](https://github.com/antelm-dev/electron-run/compare/v0.3.2...v0.4.0) (2026-08-14)
 
 
